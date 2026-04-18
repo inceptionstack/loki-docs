@@ -1,0 +1,141 @@
+---
+title: "NemoClaw: sandboxed OpenClaw with Bedrock inference"
+description: "Run OpenClaw inside NVIDIA's OpenShell sandbox on AWS. Landlock, seccomp, and network namespace isolation block all AWS API calls except Bedrock InvokeModel."
+---
+
+NemoClaw gives you the full OpenClaw experience — persistent memory, gateway, multi-channel messaging — but with a hardware-enforced security boundary. NVIDIA's OpenShell sandbox applies Landlock filesystem restrictions, seccomp syscall filtering, and network namespace isolation to the OpenClaw process running inside it. The agent can call Bedrock for inference (routed through a bedrockify proxy on the host), but it cannot enumerate EC2 instances, assume IAM roles, read S3 buckets, or make any other AWS API call. If you want OpenClaw features with zero AWS blast radius, NemoClaw is the pack.
+
+<Note>
+**Experimental pack.** NemoClaw combines multiple upstream projects (OpenClaw, NVIDIA OpenShell, bedrockify). Expect rough edges as these components evolve independently.
+</Note>
+
+<Warning>
+NemoClaw is **only compatible with the `personal_assistant` profile**. The installer refuses any other profile at install time. The sandbox's whole purpose is to block AWS API access — using `builder` or `account_assistant` would defeat it.
+</Warning>
+
+## What makes NemoClaw different
+
+- **OpenShell sandbox.** NVIDIA's OpenShell applies Landlock (filesystem), seccomp (syscalls), and network namespace isolation to the agent container. An agent running malicious or misconfigured code inside NemoClaw cannot touch your AWS resources.
+- **Bedrock via bedrockify on the host.** Inference calls exit the sandbox through a controlled path to bedrockify running on the host EC2 instance. The sandbox blocks all other outbound AWS API calls.
+- **Same OpenClaw interface.** You interact using the same `openclaw` TUI and commands as the non-sandboxed pack. Persistent memory lives in `~/.openclaw/` on an 80 GB data volume.
+- **Requires Docker and t4g.xlarge.** The OpenShell sandbox runs inside Docker with cgroup v2 configuration. The pack installs Docker automatically, but the instance must have at least 4 vCPUs and 8 GB of RAM.
+
+## Compatible profiles
+
+| Profile | Supported | Reason |
+|---|---|---|
+| `personal_assistant` | Yes | Bedrock-only IAM; sandbox blocks AWS API access |
+| `account_assistant` | No | Sandbox blocks the AWS API calls this profile is meant to make |
+| `builder` | No | Sandbox blocks the AWS API calls this profile is meant to make |
+
+## Prerequisites
+
+- AWS CLI configured with admin access in a **dedicated sandbox account**
+- Amazon Bedrock model access enabled in your target region (default: `us-east-1`)
+- **Must use `--profile personal_assistant`** — the installer will fail with any other profile
+- Instance must be at least `t4g.xlarge` (4 vCPUs, 8 GB RAM minimum for the sandbox)
+- Docker is installed automatically by the pack if not present
+
+## Install
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack nemoclaw \
+  --profile personal_assistant
+```
+
+The pack runs these steps automatically:
+
+<Steps>
+  <Step title="Profile guard">
+    Verifies the profile is `personal_assistant` and refuses to continue otherwise.
+  </Step>
+  <Step title="Docker install and cgroup v2 configuration">
+    Installs Docker (if absent), configures `default-cgroupns-mode: host` for cgroup v2 compatibility, and adds `ec2-user` to the `docker` group.
+  </Step>
+  <Step title="bedrockify health check">
+    Confirms bedrockify is running on port 8090 (installed automatically as a dependency).
+  </Step>
+  <Step title="NemoClaw and OpenShell install">
+    Downloads and runs NVIDIA's installer, which installs NemoClaw and OpenShell.
+  </Step>
+  <Step title="Sandbox creation">
+    Runs `nemoclaw onboard` non-interactively to create the sandbox named `loki-assistant`, pointing inference at `http://127.0.0.1:8090/v1` (bedrockify on the host).
+  </Step>
+  <Step title="Identity files injected">
+    Agent identity and configuration files are copied into the sandbox container so the agent has its instructions and context from the first message.
+  </Step>
+</Steps>
+
+## Connect and use
+
+After the stack deploys, SSM into the instance and interact with the sandbox:
+
+```bash
+# Open a session
+aws ssm start-session --target <instance-id>
+
+# Check sandbox status
+nemoclaw loki-assistant status
+
+# Send a one-shot message to the agent inside the sandbox
+nemoclaw loki-assistant exec openclaw agent --agent main -m "Hello"
+
+# Open the OpenClaw TUI inside the sandbox
+nemoclaw loki-assistant exec openclaw tui
+```
+
+## Configuration options
+
+| Parameter | Default | Description |
+|---|---|---|
+| `--region` | `us-east-1` | AWS region for Bedrock |
+| `--model` | `us.anthropic.claude-sonnet-4-6` | Bedrock model ID (routed via bedrockify) |
+| `--bedrockify-port` | `8090` | Port where bedrockify listens on the host |
+| `--sandbox-name` | `loki-assistant` | Name of the OpenShell sandbox |
+| `--telegram-token` | — | Optional Telegram bot token for the bridge |
+| `--allowed-chat-ids` | — | Comma-separated Telegram chat IDs |
+
+These parameters are passed via the bootstrap dispatcher config file. To override them, use advanced mode or run the pack script directly.
+
+## Security model
+
+The OpenShell sandbox enforces isolation at three layers:
+
+<AccordionGroup>
+  <Accordion title="Landlock (filesystem)">
+    Restricts which paths the sandboxed process can read or write. The agent cannot access host OS paths outside the permitted sandbox workspace.
+  </Accordion>
+  <Accordion title="seccomp (syscalls)">
+    Filters which Linux system calls the sandboxed process can make. Dangerous or unnecessary syscalls are blocked at the kernel level.
+  </Accordion>
+  <Accordion title="Network namespace isolation">
+    The sandbox runs in its own network namespace. All outbound network traffic is routed through a controlled path — only Bedrock inference via the host bedrockify proxy is permitted. Direct AWS SDK calls (EC2, IAM, S3, etc.) are blocked.
+  </Accordion>
+</AccordionGroup>
+
+An agent running inside NemoClaw **cannot**:
+- Enumerate EC2, IAM, or S3 resources
+- Assume IAM roles
+- Make non-Bedrock AWS API calls
+- Access host filesystem paths outside the sandbox
+
+An agent running inside NemoClaw **can**:
+- Call Bedrock `InvokeModel` via bedrockify on the host
+- Read and write files within the sandbox workspace
+- Use the Telegram bridge (if configured)
+
+## Resource requirements
+
+| | Personal assistant |
+|---|---|
+| Instance type | `t4g.xlarge` (minimum — 4 vCPUs, 8 GB RAM required) |
+| Root volume | 40 GB |
+| Data volume | 80 GB |
+
+## Notes and limitations
+
+- NemoClaw is the only pack that **requires Docker**. The pack installs it automatically, but the instance must support Docker (all Lowkey-supported AMIs do).
+- The sandbox manages its own lifecycle — there is no systemd service to check. Use `nemoclaw <sandbox-name> status` to inspect the sandbox state.
+- Tearing down the CloudFormation or Terraform stack deletes the sandbox and the 80 GB data volume. Back up any important workspace files before tearing down.
+- If you need Bedrock access without the sandbox, use the standard [OpenClaw pack](/agents/openclaw) with `personal_assistant`.

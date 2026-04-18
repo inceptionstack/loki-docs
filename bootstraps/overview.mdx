@@ -1,0 +1,66 @@
+---
+title: "Bootstraps: configure your Lowkey agent after deploy"
+description: "Bootstraps are prompt-based configuration instructions you paste into your agent chat to teach it how to behave on your Lowkey install."
+---
+
+After your Lowkey agent is running, bootstraps are how you finish setting it up. Each bootstrap is a markdown file in the Lowkey repository. You paste a prompt into your agent chat, the agent reads the file from GitHub, and it configures itself accordingly — updating its memory, installing tools, and applying settings. You don't edit config files manually; you tell your agent what to do, and it does it.
+
+## How bootstraps work
+
+Every bootstrap follows the same pattern: you give your agent a URL pointing to one or more bootstrap files, and it reads and applies them on its own.
+
+The canonical prompt looks like this:
+
+```
+Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/tree/main/bootstraps/essential
+```
+
+You can use this exact phrase for any bootstrap directory or individual file. The agent fetches the content, reads the instructions, and configures itself.
+
+<Note>
+  Bootstraps are idempotent — running the same bootstrap more than once is safe. Each bootstrap checks for a marker file (e.g. `memory/.bootstrapped-model-config`) before doing work, so duplicate runs are skipped automatically.
+</Note>
+
+## Bootstrap categories
+
+Lowkey ships with three categories of bootstraps:
+
+<CardGroup cols={3}>
+  <Card title="Essential" icon="circle-check" href="/bootstraps/essential">
+    Run these on every new install. They reduce mistakes and significantly improve agent behavior. Essential bootstraps cover model config, security, memory, coding standards, and more.
+  </Card>
+  <Card title="Optional" icon="sliders" href="/bootstraps/optional">
+    Pick the optional bootstraps that fit your workflow. They extend Lowkey with features like GitHub Actions code review, CI/CD notifications, and a web UI.
+  </Card>
+  <Card title="Telegram" icon="paper-plane" href="/bootstraps/telegram">
+    Set up Telegram integration so you can interact with your agent from any device. Includes both direct message and group chat support.
+  </Card>
+</CardGroup>
+
+## Recommended order
+
+<Steps>
+  <Step title="Run essential bootstraps first">
+    Paste the essential bootstraps URL into your agent chat immediately after your first session. These set up the foundation everything else depends on — model configuration in particular should run before anything else.
+
+    ```
+    Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/tree/main/bootstraps/essential
+    ```
+  </Step>
+  <Step title="Add optional bootstraps as needed">
+    Once essential bootstraps are done, browse the optional list and run any that match your workflow. These are additive — you can run them at any time.
+  </Step>
+  <Step title="Set up Telegram (if you want mobile access)">
+    If you want to interact with your agent from Telegram, run the Telegram bootstraps last. They depend on the essential bootstraps having run first.
+  </Step>
+</Steps>
+
+<Tip>
+  You can also run individual bootstraps by pointing your agent at a specific file URL. For example:
+
+  ```
+  Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/blob/main/bootstraps/essential/BOOTSTRAP-MODEL-CONFIG.md
+  ```
+
+  This is useful when you want to re-apply a single bootstrap without re-running the full set.
+</Tip>

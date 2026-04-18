@@ -1,0 +1,129 @@
+---
+title: "Codex CLI: run OpenAI's coding agent on your AWS EC2"
+description: "Deploy OpenAI's Codex CLI as a full builder agent on AWS. Connects to OpenAI's API directly — not Bedrock. Authenticate with codex login after deploy."
+---
+
+Codex CLI is OpenAI's open-source coding agent. This pack installs it on your EC2 instance and configures it as a builder agent: the sandbox is set to `danger-full-access`, the approval policy is set to `never`, and the model defaults to `gpt-5.4`. Authentication is deliberately deferred — the pack never embeds your OpenAI credentials in the instance, so you authenticate yourself after deploy by SSM-ing in and running `codex login`.
+
+<Note>
+**Experimental pack.** Codex CLI uses OpenAI's API — not Amazon Bedrock. Your prompts and code leave your AWS account and are processed under OpenAI's terms of service. Expect rough edges as the upstream CLI evolves.
+</Note>
+
+<Warning>
+Codex CLI **does not use Bedrock**. It connects to OpenAI's API directly. You need an OpenAI account and either a ChatGPT Plus subscription or an API key from [platform.openai.com](https://platform.openai.com/api-keys).
+</Warning>
+
+## What makes Codex CLI different
+
+- **OpenAI provider.** Uses OpenAI's API instead of Bedrock. Auth is via ChatGPT browser login or an API key.
+- **Builder-mode pre-configured.** The pack writes `~/.codex/config.toml` with `sandbox_mode = "danger-full-access"` and `approval_policy = "never"` — the agent runs commands without asking permission.
+- **Post-install auth.** The pack never stores your OpenAI key in deploy templates or shell history. You authenticate interactively after deploy by SSM-ing into the instance.
+
+## Compatible profiles
+
+All three profiles are supported, but `builder` is the recommended default for Codex CLI since the agent is configured with full filesystem and network access.
+
+| Profile | IAM permissions | Use case |
+|---|---|---|
+| `builder` | AdministratorAccess | Build apps, deploy infra (recommended) |
+| `account_assistant` | ReadOnlyAccess + Bedrock | Read-only AWS access (Bedrock unused) |
+| `personal_assistant` | Bedrock only | Bedrock access (Bedrock unused by Codex) |
+
+## Prerequisites
+
+- AWS CLI configured with admin access in a **dedicated sandbox account**
+- An OpenAI account with ChatGPT Plus or an API key from [platform.openai.com](https://platform.openai.com/api-keys)
+- No Bedrock access, Docker, or interactive AWS login needed
+
+## Install
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack codex-cli \
+  --profile builder
+```
+
+After the stack finishes deploying, SSM into the instance and authenticate (see below). The agent will not work until you complete this step.
+
+## Post-install: authenticate
+
+Codex auth is intentionally deferred. SSM into the instance and choose one of these methods:
+
+<Tabs>
+  <Tab title="ChatGPT login (browser)">
+    ```bash
+    aws ssm start-session --target <instance-id>
+
+    codex login
+    # Codex prints a device code and a URL.
+    # Open the URL in your browser and enter the code.
+    ```
+  </Tab>
+  <Tab title="OpenAI API key">
+    ```bash
+    aws ssm start-session --target <instance-id>
+
+    # Pipe the key directly — avoids storing it in shell history
+    printenv OPENAI_API_KEY | codex login --with-api-key
+    ```
+  </Tab>
+</Tabs>
+
+Verify authentication succeeded:
+
+```bash
+codex --version
+codex login status            # → "Logged in using ChatGPT" or "API key active"
+codex exec "what is 2+3?"    # → 5
+```
+
+## Use the agent
+
+```bash
+# Interactive TUI
+codex
+
+# One-shot execution
+codex exec "Refactor the auth module in /home/ec2-user/myapp"
+
+# Resume the last session
+codex resume --last
+```
+
+## Configuration options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--region` | `us-east-1` | AWS region (informational only — Codex uses OpenAI's API) |
+| `--model` | `gpt-5.4` | OpenAI model ID |
+
+<Warning>
+If you pass a Bedrock-style model ID (such as `us.anthropic.claude-opus-4-6-v1`) via `--model`, the pack detects it and falls back to `gpt-5.4`. OpenAI's API returns HTTP 400 for Bedrock model IDs. This guard is intentional.
+</Warning>
+
+The managed block in `~/.codex/config.toml` looks like this:
+
+```toml
+# >>> managed by lowkey codex-cli pack >>>
+model = "gpt-5.4"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+# <<< managed by lowkey codex-cli pack <<<
+
+# Anything below this block is yours — preserved on re-install
+```
+
+## Resource requirements
+
+| | All profiles |
+|---|---|
+| Instance type | `t4g.medium` |
+| Root volume | 40 GB |
+| Data volume | 0 GB |
+
+## Notes and limitations
+
+- Codex CLI is a **pure CLI pack** — no background service runs between sessions.
+- Authentication is **not headless** — you must SSM into the instance after deploy to complete the `codex login` step. Fully headless auth (e.g., via Secrets Manager) is not yet supported.
+- Your prompts and code leave your AWS account and go to OpenAI's infrastructure. Review [OpenAI's data usage policy](https://openai.com/policies/api-data-usage-policies) before use.
+- When you tear down the stack, Codex credentials on the instance vanish with the EBS volume. If the OpenAI key was shared with other systems, rotate it separately.

@@ -1,0 +1,69 @@
+---
+title: "Optional bootstraps: extend Lowkey with extra features"
+description: "Optional bootstraps add workflow-specific features to Lowkey. Run them after essential bootstraps, picking only the ones that match how you work."
+---
+
+Optional bootstraps extend Lowkey beyond its baseline configuration. Unlike essential bootstraps — which every install needs — optional bootstraps are selective. Browse the list below and run the ones that fit your workflow. You can add them at any time after the essential bootstraps have run.
+
+## Available optional bootstraps
+
+<AccordionGroup>
+  <Accordion title="BOOTSTRAP-GITHUBACTION-CODE-REVIEW">
+    Adds two GitHub Actions workflows to your repositories for automatic AI code review using Claude on Bedrock:
+
+    - **PR review** — reviews every pull request and responds to `@claude` mentions in PR comments
+    - **Commit review** — reviews every push to `main` and creates a GitHub issue plus Telegram alert when critical issues are found (security vulnerabilities, hardcoded secrets, etc.)
+
+    Both workflows use org-level secrets so there's no per-repository setup once the secrets are configured.
+
+    **When to use it:** If you're pushing code to GitHub repos and want automatic review without setting up a separate CI tool.
+  </Accordion>
+
+  <Accordion title="BOOTSTRAP-PIPELINE-NOTIFICATIONS">
+    Wires up CI/CD pipeline notifications to Telegram and injects build events into your agent's session so it can react automatically to failures.
+
+    Covers two notification sources:
+    - **AWS CodePipeline** — EventBridge → Lambda → Telegram and OpenClaw system event
+    - **GitHub Actions** — webhook → API Gateway → Lambda → Telegram
+
+    When a pipeline fails, your agent is notified and can investigate the CodeBuild logs, propose a fix, and push a corrected commit — without you having to ask.
+
+    **When to use it:** If you have CodePipeline or GitHub Actions pipelines and want your agent to monitor and respond to build failures automatically.
+  </Accordion>
+
+  <Accordion title="BOOTSTRAP-WEB-UI">
+    Exposes your agent's web control UI through a CloudFront distribution secured by Cognito login. The agent's gateway stays on loopback — a Node.js proxy on the same EC2 handles authentication and proxies HTTP and WebSocket traffic.
+
+    The resulting architecture has three independent auth layers: CloudFront IP restrictions on the ALB, Cognito JWT validation in the proxy, and the gateway's own bearer token.
+
+    **When to use it:** If you want browser-based access to your agent's control UI from outside the EC2 instance, without opening SSH or exposing the gateway to the internet.
+
+    <Note>
+      This bootstrap is primarily for OpenClaw. Hermes uses Open WebUI or a direct API server endpoint — the bootstrap covers both options.
+    </Note>
+  </Accordion>
+
+  <Accordion title="OPTIMIZE-TOO-LARGE-CONTEXT">
+    Reduces the agent's system prompt size when it has grown too large, causing context limit errors or slow responses. The optimization moves workspace files into skills, slims down `SOUL.md` to its essential identity content, and reorganizes what loads on every message versus what loads on demand.
+
+    **When to use it:** If your agent's system prompt exceeds roughly 5,000 tokens for workspace files, or if you're hitting context limits more frequently than expected.
+
+    <Note>
+      This bootstrap applies to OpenClaw only. Hermes has built-in context compression and does not require manual optimization.
+    </Note>
+  </Accordion>
+</AccordionGroup>
+
+## Run an optional bootstrap
+
+Point your agent at the specific file you want to apply:
+
+```
+Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/blob/main/bootstraps/optional/BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md
+```
+
+Replace the filename with whichever optional bootstrap you want to run. You can also run all optional bootstraps at once by pointing at the directory, but reviewing each one individually is recommended so you understand what each configures before it runs.
+
+```
+Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/tree/main/bootstraps/optional
+```

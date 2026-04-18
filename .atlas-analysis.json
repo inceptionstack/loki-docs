@@ -1,0 +1,113 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "Lowkey",
+  "projectDescription": "Self-hosted AI coding agents on AWS — deploy OpenClaw, Claude Code, Codex, Kiro, and more to your own AWS account with a single command.",
+  "theme": "aspen",
+  "primaryColor": "#848c8e",
+  "lightColor": "#11161e",
+  "darkColor": "#cfd0d2",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guide",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "concepts"
+            ]
+          },
+          {
+            "group": "Profiles",
+            "pages": [
+              "profiles/overview",
+              "profiles/builder",
+              "profiles/account-assistant",
+              "profiles/personal-assistant"
+            ]
+          },
+          {
+            "group": "Agents",
+            "pages": [
+              "agents/overview",
+              "agents/openclaw",
+              "agents/claude-code",
+              "agents/codex-cli",
+              "agents/kiro-cli",
+              "agents/nemoclaw",
+              "agents/hermes"
+            ]
+          },
+          {
+            "group": "Bootstraps",
+            "pages": [
+              "bootstraps/overview",
+              "bootstraps/essential",
+              "bootstraps/optional",
+              "bootstraps/telegram"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "CLI",
+            "pages": [
+              "reference/cli",
+              "reference/simple-mode-defaults",
+              "reference/environment-variables"
+            ]
+          },
+          {
+            "group": "Deploy",
+            "pages": [
+              "reference/cloudformation",
+              "reference/terraform"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "reference/security-services",
+              "reference/secrets-manager"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "One-command deploy of AI coding agents to your AWS account",
+    "Eight agent packs: OpenClaw, Claude Code, Codex CLI, Kiro CLI, NemoClaw, Hermes, Pi, IronClaw",
+    "Three permission profiles: builder (admin), account_assistant (read-only), personal_assistant (Bedrock-only)",
+    "CloudFormation and Terraform deployment methods",
+    "Persistent memory and 24/7 always-on agent operation",
+    "Multi-channel access: Telegram, Discord, Slack, or terminal UI",
+    "Bootstraps system for configuring agent behavior and skills",
+    "Built-in AWS security services: GuardDuty, Security Hub, Inspector, Access Analyzer, Config",
+    "bedrockify OpenAI-compatible proxy for Amazon Bedrock",
+    "Full data ownership — everything stays in your AWS account"
+  ],
+  "publicApiSurface": [
+    "curl -sfL install.lowkey.run | bash (interactive installer)",
+    "install.sh --pack <name> --profile <name> --method <cfn|terraform>",
+    "install.sh -y / --non-interactive / --yes",
+    "install.sh --simple / --advanced",
+    "install.sh --kiro-from-secret <id-or-arn>",
+    "packs/openclaw/install.sh --region --model --port",
+    "packs/claude-code/install.sh --region",
+    "packs/hermes/install.sh --region --hermes-model",
+    "packs/bedrockify/install.sh --region --port",
+    "packs/nemoclaw/install.sh --region --model --profile",
+    "packs/kiro-cli/install.sh --region",
+    "packs/codex-cli/install.sh --region --model",
+    "curl -sfL uninstall.lowkey.run | bash (uninstaller)",
+    "aws ssm start-session --target <instance-id>",
+    "openclaw tui / loki tui (agent TUI)",
+    "openclaw --version / claude --version / codex --version / kiro-cli --version"
+  ]
+}

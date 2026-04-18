@@ -1,0 +1,135 @@
+---
+title: "OpenClaw: persistent AI agent with gateway and memory"
+description: "Deploy OpenClaw on AWS for a 24/7 AI agent with a systemd gateway, persistent memory, and Telegram, Discord, and Slack integrations backed by Amazon Bedrock."
+---
+
+OpenClaw is the flagship Lowkey pack. Unlike the other agents in this list, it isn't a one-shot CLI — it runs a long-lived gateway service that stays alive between your sessions, remembers everything across restarts, and connects to messaging channels so you can reach it from anywhere. If you want an agent that watches your account overnight, picks up where it left off after a reboot, or sends you a morning briefing on Telegram, OpenClaw is the pack to use.
+
+<Note>
+**Stable pack.** OpenClaw is production-quality. Its gateway API and auth shape will not change without notice.
+</Note>
+
+## What makes OpenClaw different
+
+- **24/7 gateway service.** The `openclaw-gateway` systemd user service starts on boot and runs on port 3001. You don't have to be logged in for the agent to work.
+- **Persistent memory.** Conversation history, workspace files (`SOUL.md`, `TOOLS.md`, `MEMORY.md`), and agent state are stored in `~/.openclaw/` on an 80 GB EBS data volume. The agent knows what it built yesterday.
+- **Multi-channel access.** Connect via Telegram, Discord, Slack, or the `openclaw tui` / `loki tui` terminal UI.
+- **Bedrock via IAM role.** No API keys to manage. The instance's IAM role grants `bedrock:InvokeModel` — auth is automatic.
+
+## Compatible profiles
+
+| Profile | IAM permissions | Instance | Use case |
+|---|---|---|---|
+| `builder` | AdministratorAccess | `t4g.xlarge` (recommended) | Build apps, deploy infra, manage pipelines |
+| `account_assistant` | ReadOnlyAccess + Bedrock | `t4g.medium` | Cost analysis, architecture review, debugging |
+| `personal_assistant` | Bedrock only | `t4g.medium` | Writing, research, coding help, daily tasks |
+
+## Prerequisites
+
+- AWS CLI configured with admin access in a **dedicated sandbox account**
+- Amazon Bedrock model access enabled in your target region (default: `us-east-1`)
+- No API keys, Docker, or interactive login needed
+
+## Install
+
+<Tabs>
+  <Tab title="Builder">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw \
+      --profile builder
+    ```
+  </Tab>
+  <Tab title="Account assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw \
+      --profile account_assistant
+    ```
+  </Tab>
+  <Tab title="Personal assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw \
+      --profile personal_assistant
+    ```
+  </Tab>
+</Tabs>
+
+The installer provisions the EC2 instance, mounts the 80 GB data volume, installs `openclaw` via npm (pinned version), generates a gateway auth token, writes `~/.openclaw/openclaw.json`, and starts the `openclaw-gateway` systemd user service. Total deploy time is approximately 4–10 minutes.
+
+## Connect and use
+
+Once the stack is deployed, SSM into the instance and interact directly:
+
+```bash
+# Open a session
+aws ssm start-session --target <instance-id>
+
+# Check the installed version
+openclaw --version
+
+# Send a one-shot message to the main agent
+openclaw agent --agent main -m "Summarize my AWS spend for this month"
+
+# Open the terminal UI (alias: loki tui)
+openclaw tui
+```
+
+Check the gateway service status at any time:
+
+```bash
+systemctl --user status openclaw-gateway.service
+```
+
+## Post-install: connect messaging channels
+
+After the gateway is running, configure channel integrations from inside the instance:
+
+```bash
+# Interactive channel setup wizard
+openclaw configure
+
+# List connected channels
+openclaw channels list
+```
+
+Full channel setup instructions (Telegram, Discord, Slack, WhatsApp) are in [OpenClaw's own documentation](https://docs.openclaw.ai).
+
+## Configuration options
+
+When running the pack in standalone mode (outside of the full installer), you can override configuration with flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--region` | `us-east-1` | AWS region for Bedrock |
+| `--model` | `us.anthropic.claude-opus-4-6-v1` | Default Bedrock model ID |
+| `--gw-port` | `3001` | Gateway listening port |
+| `--token` | auto-generated | Gateway auth token |
+| `--model-mode` | `bedrock` | `bedrock`, `litellm`, or `api-key` |
+| `--litellm-base-url` | — | LiteLLM proxy base URL (`model-mode=litellm`) |
+| `--litellm-api-key` | — | LiteLLM API key (`model-mode=litellm`) |
+| `--litellm-model` | `claude-opus-4-6` | LiteLLM model ID |
+| `--provider-api-key` | — | Direct Anthropic API key (`model-mode=api-key`) |
+
+## Resource requirements
+
+| | Builder | Assistant profiles |
+|---|---|---|
+| Instance type | `t4g.xlarge` | `t4g.medium` |
+| Root volume | 40 GB | 40 GB |
+| Data volume | 80 GB | 80 GB |
+
+## Run essential bootstraps
+
+After connecting for the first time, run the essential bootstraps to give the agent its skills and configuration. Paste this into your OpenClaw chat:
+
+> *"Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/tree/main/bootstraps/essential"*
+
+This sets up coding guidelines, memory search, model config, disk space strategy, and more.
+
+## Notes and limitations
+
+- The 80 GB data volume is attached at deploy time. If you delete the CloudFormation or Terraform stack, the volume is deleted with it. Back up `~/.openclaw/` before tearing down if you want to preserve memory and state.
+- The gateway listens on localhost only — it is not exposed to the internet. Access it via SSM Session Manager or a channel integration.
+- OpenClaw installs a pinned npm version for stability. Upstream updates require a deliberate pack re-run.

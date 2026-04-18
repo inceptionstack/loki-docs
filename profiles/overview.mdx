@@ -1,0 +1,76 @@
+---
+title: "Choosing the right Lowkey permission profile for AWS"
+description: "Profiles set how much AWS access your agent has — from full admin down to Bedrock-only inference. Pick the right one before you deploy."
+---
+
+A profile is the IAM permission boundary your agent runs inside. It controls which AWS APIs the agent can call, what instance size it gets, and which security services are enabled by default. Choosing the right profile upfront is the single most important security decision in a Lowkey deployment — you can redeploy with a different profile at any time, but it requires tearing down and recreating the stack.
+
+## Profile comparison
+
+| | `builder` | `account_assistant` | `personal_assistant` |
+|---|---|---|---|
+| **IAM managed policy** | `AdministratorAccess` | `ReadOnlyAccess` + targeted writes | Inline: Bedrock `InvokeModel` only |
+| **Default instance** | t4g.xlarge (4 vCPU, 16 GiB) | t4g.medium (2 vCPU, 4 GiB) | t4g.medium (2 vCPU, 4 GiB) |
+| **Security Hub** | On | On | Off |
+| **GuardDuty** | On | On | Off |
+| **Inspector** | On | On | Off |
+| **Access Analyzer** | On | On | Off |
+| **Config recorder** | On | On | Off |
+| **Typical use case** | Building apps, deploying infra, managing pipelines | Cost analysis, architecture review, read-only debugging | Writing, research, coding help, personal tasks |
+
+<Note>
+  All profiles also attach `AmazonSSMManagedInstanceCore` so you can always connect to the instance via SSM Session Manager, regardless of which profile you choose.
+</Note>
+
+## Passing `--profile` to the installer
+
+Include `--profile <name>` in your install command to skip the interactive prompt:
+
+```bash
+# Full builder agent
+curl -sfL install.lowkey.run | bash -s -- -y --pack openclaw --profile builder
+
+# Read-only advisor
+curl -sfL install.lowkey.run | bash -s -- -y --pack openclaw --profile account_assistant
+
+# Personal assistant (Bedrock inference only)
+curl -sfL install.lowkey.run | bash -s -- -y --pack claude-code --profile personal_assistant
+```
+
+If you omit `--profile` and pass `-y` (non-interactive), the installer defaults to `builder`.
+
+## Which profile should you pick?
+
+<AccordionGroup>
+  <Accordion title="I want the agent to build, deploy, and manage AWS resources">
+    Use **`builder`**. It gets `AdministratorAccess` and a larger instance (t4g.xlarge) so it can compile code, run tests, build Docker images, and deploy infrastructure without hitting resource limits.
+
+    **Required:** deploy in a dedicated sandbox AWS account. With `AdministratorAccess`, a mistake means admin-level damage. A sandbox limits the blast radius to one account.
+
+    See [Builder profile](/profiles/builder) for details.
+  </Accordion>
+  <Accordion title="I want the agent to read and explain my AWS account, but not change anything">
+    Use **`account_assistant`**. It gets `ReadOnlyAccess` plus a small set of targeted write permissions (tagging resources, writing CloudWatch log events, calling Bedrock). The agent can answer questions about your architecture, analyze costs, and help debug issues — without the ability to create, modify, or delete AWS resources.
+
+    See [Account assistant profile](/profiles/account-assistant) for details.
+  </Accordion>
+  <Accordion title="I want a general-purpose AI assistant with no AWS access">
+    Use **`personal_assistant`**. The agent can only call Bedrock `InvokeModel` — it has no AWS API surface at all. Security services are off by default because there is nothing to monitor. Good for writing, research, coding help, and daily tasks.
+
+    This is also the **only profile compatible with NemoClaw**, the sandboxed agent pack, because the OpenShell sandbox blocks all AWS API access anyway.
+
+    See [Personal assistant profile](/profiles/personal-assistant) for details.
+  </Accordion>
+</AccordionGroup>
+
+<CardGroup cols={3}>
+  <Card title="Builder" icon="hammer" href="/profiles/builder">
+    Full `AdministratorAccess`. Builds, deploys, and manages AWS resources. Requires a dedicated sandbox account.
+  </Card>
+  <Card title="Account assistant" icon="magnifying-glass" href="/profiles/account-assistant">
+    `ReadOnlyAccess` plus limited writes. Reads and explains your account without making changes.
+  </Card>
+  <Card title="Personal assistant" icon="user" href="/profiles/personal-assistant">
+    Bedrock inference only. No AWS API access. For writing, research, and coding help.
+  </Card>
+</CardGroup>

@@ -1,0 +1,101 @@
+---
+title: "AWS security services that Lowkey enables by default"
+description: "What each of the five AWS security services does, why Lowkey enables them for builder and account_assistant profiles, approximate costs, and how to opt out."
+---
+
+Lowkey enables five AWS security services by default for `builder` and `account_assistant` profiles. They cost a small amount each month and give you alert-only visibility into what the agent does inside your account. This page explains each service, why the defaults are what they are, and how to change them.
+
+## What each service does
+
+<CardGroup cols={2}>
+  <Card title="Security Hub" icon="shield">
+    Aggregates findings from GuardDuty, Inspector, Access Analyzer, and AWS Config into a single dashboard. It also runs CIS Benchmarks and AWS Foundational Security Best Practices checks. Security Hub is the one place to look when reviewing what the agent has been up to.
+  </Card>
+  <Card title="GuardDuty" icon="radar">
+    Threat detection on AWS API activity. It analyzes CloudTrail, VPC flow logs, and DNS queries to flag anomalies: crypto-mining patterns, credential exfiltration attempts, malware network signatures, and unusual API call sequences. This is the service most likely to catch an agent doing something obviously wrong.
+  </Card>
+  <Card title="Inspector" icon="magnifying-glass">
+    Continuous vulnerability scanning of EC2 instances, Lambda functions, and container images. Inspector tells you when the agent's operating system or any Lambda runtimes have known CVEs, so you can patch before they become a problem.
+  </Card>
+  <Card title="Access Analyzer" icon="door-open">
+    Flags AWS resources that are exposed outside your account — public S3 buckets, overly permissive IAM roles, and similar misconfigurations. This catches the "the agent accidentally made this public" class of mistake. Access Analyzer runs at no additional charge for most usage.
+  </Card>
+  <Card title="Config recorder" icon="book">
+    Records every resource configuration change in the account. This gives you a full audit trail: what did the agent create, when did it create it, and what settings did it apply. Security Hub requires Config to be on for many of its compliance checks.
+  </Card>
+</CardGroup>
+
+## Why they're on by default
+
+Builder and account_assistant profiles give the agent meaningful AWS access. Running those profiles without monitoring means you find out about problems by reading the bill — or not at all. These services are **alert-only by default**: they surface findings for you to review, but they never block the agent.
+
+Personal assistant profile has no AWS write access, so there is nothing to monitor. All five services are off by default for that profile to keep cost near zero.
+
+<Note>
+Enabling these services does not make the agent secure. They surface findings — reviewing and acting on those findings is your responsibility.
+</Note>
+
+## Approximate costs
+
+Costs vary by region, account activity, and number of resources. These are rough estimates for a single-agent install:
+
+| Service | Approximate monthly cost | Notes |
+|---------|--------------------------|-------|
+| Security Hub | $1–5 | Per-finding + per-check pricing |
+| GuardDuty | $5–20 | VPC flow logs + CloudTrail + DNS logs |
+| Inspector | $1–3 | Per-resource per-scan |
+| Access Analyzer | $0 | Free tier covers typical single-account use |
+| Config recorder | $2–10 | Per-configuration item recorded + per-rule evaluation |
+| **Total** | **~$10–40 / month** | GuardDuty is the largest driver |
+
+Your actual AWS bill is the source of truth. Set an AWS Budget alert before deploying.
+
+## Opting out in advanced mode
+
+You can disable any individual service — or all of them — when you deploy in advanced mode:
+
+```bash
+curl -sfL install.lowkey.run | bash
+# → choose "Advanced" install mode
+# → answer "no" for each service you want to skip
+```
+
+Or deploy the CloudFormation template directly and set any `Enable*` parameter to `false`:
+
+```bash
+ParameterKey=EnableGuardDuty,ParameterValue=false \
+ParameterKey=EnableInspector,ParameterValue=false
+```
+
+For Terraform, set the corresponding boolean variables:
+
+```bash
+-var="enable_guardduty=false" \
+-var="enable_inspector=false"
+```
+
+## Opting in for personal_assistant
+
+You can also enable security services on a `personal_assistant` deploy by using advanced mode and answering "yes" when each service is asked. This is useful if you want GuardDuty monitoring even on a Bedrock-only agent — for example, to catch compromised instance credentials.
+
+## Where findings appear
+
+All findings from GuardDuty, Inspector, Access Analyzer, and Config are aggregated into **Security Hub** when it is enabled. Without Security Hub, check each service's own console:
+
+- **GuardDuty**: GuardDuty → Findings
+- **Inspector**: Inspector → Findings
+- **Access Analyzer**: IAM → Access Analyzer → Findings
+- **Config**: Config → Rules → Non-compliant resources
+
+Security Hub as the single aggregation point is the lowest-friction setup.
+
+## Filtering by Lowkey resources
+
+Every resource Lowkey creates is tagged `loki:managed=true` and `loki:watermark=<env-name>`. In Security Hub, filter to findings about your specific Lowkey install:
+
+```
+Filter: ResourceTags.key = loki:managed
+        ResourceTags.value = true
+```
+
+This narrows findings to resources created by Lowkey rather than everything else in your account.

@@ -1,0 +1,143 @@
+---
+title: "Core concepts: packs, profiles, and deploy methods"
+description: "The four concepts that control every Lowkey deployment: pack, profile, install mode, and deploy method — and how they combine into a working agent."
+---
+
+Every Lowkey deployment is defined by four choices: which agent runtime to run (pack), how much AWS access it gets (profile), how much you want to configure manually (install mode), and which infrastructure tool creates the resources (deploy method). Understanding how these fit together makes it easy to pick the right options and predict what the installer will do.
+
+## Pack
+
+A **pack** is a self-contained agent runtime. When you deploy Lowkey, you deploy exactly one pack onto an EC2 instance. Every pack installs a specific AI coding agent, wires it to a model provider, and configures the right system settings.
+
+All packs implement the same installer contract, so the top-level installer treats them uniformly — it presents your options and handles the full deploy regardless of which agent you pick.
+
+### Available packs
+
+| Pack | Type | Description |
+|------|------|-------------|
+| `openclaw` | Agent | Full stateful agent with 24/7 gateway, persistent memory, and multi-channel access (Telegram, Discord, Slack). The default. |
+| `claude-code` | Agent | Anthropic's Claude Code CLI. Native Bedrock support, auto-updates, full tool access. No bedrockify proxy needed. |
+| `hermes` | Agent (experimental) | NousResearch Hermes CLI — lightweight, terminal-focused, self-improving skills. Uses bedrockify for Bedrock access. |
+| `pi` | Agent (experimental) | Minimal terminal coding harness with read, write, edit, and bash tools. Pure Node.js. |
+| `ironclaw` | Agent (experimental) | NEAR AI's Rust-based agent. Static binary, fast startup, shell and file tools, MCP support. |
+| `nemoclaw` | Agent (experimental) | OpenClaw inside an NVIDIA OpenShell sandbox. Landlock + seccomp + network namespace isolation. `personal_assistant` profile only — the sandbox blocks all AWS API access. |
+| `kiro-cli` | Agent (experimental) | AWS agentic IDE terminal client with MCP server support. Uses Kiro's own cloud inference — no Bedrock needed. Requires interactive SSO login after deploy (or `--kiro-from-secret` for headless mode). |
+| `codex-cli` | Agent (experimental) | OpenAI's Codex coding agent. Uses the OpenAI API directly — no Bedrock needed. Run `codex login` on the instance after deploy. |
+
+<Note>
+  The installer also installs `bedrockify` as a dependency for most packs. Bedrockify is an OpenAI-compatible proxy for Amazon Bedrock that runs as a systemd daemon on port 8090. Packs that connect directly to their provider's API (Codex CLI, Kiro CLI) skip it.
+</Note>
+
+## Profile
+
+A **profile** controls the IAM permissions attached to the agent's EC2 instance profile. Choosing the right profile is the most important security decision you make during setup.
+
+| Profile | IAM policy | Instance size (simple mode) | Typical use |
+|---------|------------|-----------------------------|-------------|
+| `builder` | `AdministratorAccess` | `t4g.xlarge` | Building and deploying apps, managing infrastructure, running CI/CD pipelines |
+| `account_assistant` | `ReadOnlyAccess` + targeted tag/log writes | `t4g.medium` | Cost analysis, architecture review, auditing, read-only debugging |
+| `personal_assistant` | Bedrock `InvokeModel` only (inline policy) | `t4g.medium` | Writing, research, coding help — no AWS API access at all |
+
+All profiles also get `AmazonSSMManagedInstanceCore` so you can connect via SSM Session Manager.
+
+<Warning>
+  The `builder` profile grants `AdministratorAccess` to your entire AWS account. Use a dedicated sandbox account. See [Risks](/quickstart#risks) before deploying.
+</Warning>
+
+Profiles also drive which security services turn on in simple mode:
+
+| Profile | Security Hub | GuardDuty | Inspector | Access Analyzer | Config recorder |
+|---------|:---:|:---:|:---:|:---:|:---:|
+| `builder` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `account_assistant` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `personal_assistant` | — | — | — | — | — |
+
+## Install mode
+
+Install mode controls how much the installer asks you to configure.
+
+<CardGroup cols={2}>
+  <Card title="Simple (recommended)" icon="sparkles">
+    You pick pack and profile. The installer auto-configures everything else: instance size, region, VPC, security services, environment name, and model defaults. One screen of prompts and you're deploying.
+  </Card>
+  <Card title="Advanced" icon="sliders">
+    The installer prompts for every parameter: region, instance type, VPC reuse, individual security services, environment naming, and more. Use this when you need tight control or want to deploy into an existing VPC.
+  </Card>
+</CardGroup>
+
+When you pass `-y` on the command line, the installer defaults to simple mode. You can override with `--simple` or `--advanced`.
+
+See [Simple-mode defaults](/reference/simple-mode-defaults) for the full table of what gets auto-configured.
+
+## Deploy method
+
+Lowkey ships two IaC flavors and keeps them in sync. Both call the same `bootstrap.sh` from UserData, so the agent you get is identical either way. Pick based on what the rest of your stack uses.
+
+<AccordionGroup>
+  <Accordion title="CloudFormation (default)">
+    The installer runs `aws cloudformation create-stack` with the template from the repo. It waits for `CREATE_COMPLETE` and streams stack events as they arrive. No extra tooling needed — just the AWS CLI.
+
+    To select it explicitly:
+
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- --method cfn
+    ```
+  </Accordion>
+  <Accordion title="Terraform">
+    The installer uses the Terraform module under `deploy/terraform/`. If Terraform 1.10+ isn't installed, the installer offers to download it to `/tmp` (no root required) and offers to configure an S3 backend with a DynamoDB lock table for remote state.
+
+    To select it explicitly:
+
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- --method terraform
+    ```
+
+    <Note>
+      Terraform is a good choice if you already use it to manage your AWS account and want Lowkey's resources to live in the same state.
+    </Note>
+  </Accordion>
+</AccordionGroup>
+
+## How they combine
+
+These four choices compose in a predictable chain:
+
+```
+install mode (simple / advanced)
+   └── pack  (openclaw / claude-code / codex-cli / …)
+         └── profile  (builder / account_assistant / personal_assistant)
+               └── auto defaults  (instance size, security services, region, model, …)
+```
+
+In simple mode, fixing pack and profile determines everything below. In advanced mode, you override the defaults at each step.
+
+When you run a non-interactive command like:
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y --pack openclaw --profile builder
+```
+
+You're fixing the top two layers. The installer computes the rest from [simple-mode defaults](/reference/simple-mode-defaults).
+
+## State and where things live
+
+Once deployed, here's where everything lives:
+
+| What | Where |
+|------|-------|
+| EC2 instance | New VPC in your account (one instance per install) |
+| Agent binary / service | `/home/ec2-user/` via mise and the pack's `install.sh` |
+| Pack config (per-install) | `/tmp/loki-pack-config.json` on the instance |
+| Secrets (API keys, tokens) | AWS Secrets Manager, or systemd env files at `0600` |
+| Logs | CloudWatch via SSM agent + pack-specific log files |
+| Agent memory and state | Pack-specific — OpenClaw uses `~/.openclaw/`, others vary |
+| IaC state (Terraform only) | S3 bucket + DynamoDB lock table (optional, prompted during install) |
+
+Every resource Lowkey creates is tagged `loki:managed=true` and `loki:watermark=<env-name>`. This makes it easy to find and clean up everything:
+
+```bash
+aws resourcegroupstaggingapi get-resources \
+  --tag-filters Key=loki:managed,Values=true
+```
+
+Tearing down the CloudFormation stack (or running `terraform destroy`) removes everything the installer created. Your agent's memory and any resources it built inside your account are separate — the uninstaller at `curl -sfL uninstall.lowkey.run | bash` handles those.

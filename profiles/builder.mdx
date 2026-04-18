@@ -1,0 +1,105 @@
+---
+title: "Builder profile: AdministratorAccess for your agent"
+description: "The builder profile gives your agent AdministratorAccess so it can create, modify, and delete any AWS resource. Always deploy in a sandbox account."
+---
+
+The `builder` profile is designed for agents that need to actually build things on AWS — provisioning infrastructure, deploying applications, managing IAM, configuring CI/CD pipelines, and debugging production issues. It attaches the `AdministratorAccess` managed policy to the agent's EC2 instance role, which means the agent has the same level of access as a human admin in the account.
+
+<Warning>
+  **Deploy in a dedicated sandbox account.** `AdministratorAccess` means the agent can create, modify, and delete any resource in your account — including deleting databases, modifying IAM policies, or running up large bills. LLMs make mistakes. A dedicated sandbox account limits the blast radius to one account. This is the single most important precaution you can take.
+</Warning>
+
+## What builder grants
+
+The builder profile attaches one AWS managed policy to the instance role:
+
+| Policy | ARN |
+|--------|-----|
+| `AdministratorAccess` | `arn:aws:iam::aws:policy/AdministratorAccess` |
+
+This gives the agent full read and write access to every AWS service. The agent uses this to:
+
+- Provision and update CloudFormation stacks, CDK apps, and Terraform modules
+- Create and configure Lambda functions, ECS tasks, and EC2 instances
+- Write to S3, DynamoDB, RDS, and other data services
+- Configure IAM roles and policies for the applications it builds
+- Read CloudTrail logs to debug issues and trace failures
+- Enable and read from GuardDuty, Security Hub, and Inspector findings
+
+## When to use builder
+
+Use `builder` when you want the agent to do real work on AWS:
+
+- Building full-stack applications from scratch (API + frontend + data layer)
+- Deploying infrastructure from code (CloudFormation, CDK, Terraform)
+- Setting up CI/CD pipelines and monitoring
+- Debugging production incidents where the agent needs to read logs and apply fixes
+- Running overnight infrastructure improvement jobs
+
+## Default instance size
+
+Builder defaults to a **t4g.xlarge** (4 vCPU, 16 GiB RAM, arm64 Graviton).
+
+The larger instance matters in practice. When the agent compiles code, runs test suites, builds Docker images, or runs multiple tools in parallel, a t4g.medium will bottleneck. The t4g.xlarge gives it room to work without hitting memory or CPU limits mid-task.
+
+You can override this in advanced mode if you have a specific reason, but the xlarge is the right default for builder workloads.
+
+## Security services
+
+All five AWS security services are enabled by default with `builder`:
+
+| Service | Default |
+|---------|---------|
+| Security Hub | On |
+| GuardDuty | On |
+| Inspector | On |
+| Access Analyzer | On |
+| Config recorder | On |
+
+These services let the agent surface security findings, detect anomalous activity, and identify CVEs in container images. Enabling them doesn't make the agent itself secure — it means the agent can read and act on what these services find. You are still responsible for reviewing the agent's output.
+
+<Note>
+  Security services have a small additional cost (~$5/month combined at moderate usage). You can disable individual services in advanced mode if you're running a throwaway sandbox and don't need them.
+</Note>
+
+## Deploy with builder
+
+<Tabs>
+  <Tab title="OpenClaw">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y --pack openclaw --profile builder
+    ```
+  </Tab>
+  <Tab title="Claude Code">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y --pack claude-code --profile builder
+    ```
+  </Tab>
+  <Tab title="Kiro CLI">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y --pack kiro-cli --profile builder
+    ```
+  </Tab>
+</Tabs>
+
+## After deploying
+
+Once the stack is up (~4–10 minutes), connect via SSM and run the essential bootstraps to configure the agent's skills, memory, and best practices:
+
+<Steps>
+  <Step title="Connect to the instance">
+    ```bash
+    aws ssm start-session --target <instance-id>
+    ```
+    Find the instance ID in the CloudFormation stack outputs or the EC2 console.
+  </Step>
+  <Step title="Run essential bootstraps">
+    Paste this into the agent chat to self-configure:
+    ```
+    Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/tree/main/bootstraps/essential
+    ```
+  </Step>
+  <Step title="Set a budget alert">
+    Before asking the agent to build anything, set an [AWS Budgets](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html) alert in the account. The agent will make AWS API calls — know your spend ceiling.
+  </Step>
+</Steps>

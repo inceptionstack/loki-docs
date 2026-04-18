@@ -1,0 +1,79 @@
+---
+title: "Lowkey: self-hosted AI coding agents on your AWS account"
+description: "Lowkey deploys persistent AI coding agents to your AWS account. Your code, your infrastructure, your data — all in one install command."
+---
+
+Lowkey is an open-source tool that deploys AI coding agents directly into your AWS account. Unlike cloud-based AI tools that run on someone else's servers, Lowkey gives you a 24/7 agent that lives inside your own AWS infrastructure — coding, deploying, monitoring, and debugging while you sleep.
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Deploy your first agent in ~10 minutes with a single curl command.
+  </Card>
+  <Card title="Core Concepts" icon="lightbulb" href="/concepts">
+    Understand packs, profiles, deploy methods, and how they fit together.
+  </Card>
+  <Card title="Agent Packs" icon="box" href="/agents/overview">
+    Compare OpenClaw, Claude Code, Codex CLI, Kiro, and more.
+  </Card>
+  <Card title="Profiles" icon="shield" href="/profiles/overview">
+    Choose the right IAM permission level for your use case.
+  </Card>
+</CardGroup>
+
+## What Lowkey does
+
+Lowkey provisions an EC2 instance in your AWS account and installs an AI coding agent on it. The agent connects to Amazon Bedrock (or OpenAI/Kiro for those packs) for inference, and uses your account's IAM role for AWS access. You interact with it via terminal, Telegram, Discord, or Slack.
+
+<CardGroup cols={2}>
+  <Card title="Always-on operation" icon="clock">
+    Your agent runs 24/7. Start a build Tuesday, continue Thursday — it remembers everything.
+  </Card>
+  <Card title="Your data, your account" icon="lock">
+    No code or config leaves your AWS account. Inference is via Amazon Bedrock under its data privacy policy.
+  </Card>
+  <Card title="Real AWS infrastructure" icon="aws">
+    Agents build using CloudFormation, CDK, Terraform, and standard AWS services — not proprietary runtimes.
+  </Card>
+  <Card title="Multi-channel access" icon="message">
+    Connect via Telegram, Discord, Slack, or SSM terminal from any device.
+  </Card>
+</CardGroup>
+
+## Get started in three steps
+
+<Steps>
+  <Step title="Run the installer">
+    ```bash
+    curl -sfL install.lowkey.run | bash
+    ```
+    The installer walks you through choosing an agent pack, permission profile, and deploy method. Works in bash, zsh, and AWS CloudShell.
+  </Step>
+  <Step title="Run essential bootstraps">
+    After connecting to your agent, paste this into the chat to configure skills, memory, and best practices:
+    ```
+    Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/tree/main/bootstraps/essential
+    ```
+  </Step>
+  <Step title="Start building">
+    Ask your agent to build something. It designs the architecture, writes the code, sets up CI/CD, and deploys — all inside your AWS account.
+  </Step>
+</Steps>
+
+<Warning>
+  Deploy Lowkey in a **dedicated sandbox AWS account**. The `builder` profile grants `AdministratorAccess` — LLMs make mistakes, and a sandbox limits the blast radius. See [Risks](/quickstart#risks) before deploying.
+</Warning>
+
+## Choose your agent
+
+Lowkey ships with eight agent packs. Pick the one that fits your workflow:
+
+| Pack | Best for | Inference |
+|------|----------|-----------|
+| [OpenClaw](/agents/openclaw) | Full builder with persistent memory, Telegram/Slack/Discord | Amazon Bedrock |
+| [Claude Code](/agents/claude-code) | Anthropic's coding CLI, native Bedrock support | Amazon Bedrock |
+| [Codex CLI](/agents/codex-cli) | OpenAI's coding agent | OpenAI API |
+| [Kiro CLI](/agents/kiro-cli) | AWS agentic IDE with MCP servers | Kiro cloud |
+| [NemoClaw](/agents/nemoclaw) | OpenClaw in an isolated sandbox | Amazon Bedrock |
+| [Hermes](/agents/hermes) | Lightweight NousResearch CLI | Amazon Bedrock |
+
+See [Agents overview](/agents/overview) for the full comparison.

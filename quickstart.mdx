@@ -1,0 +1,270 @@
+---
+title: "Get started with Lowkey: deploy an agent in ~10 minutes"
+description: "Install Lowkey on AWS with a single curl command. Choose your agent pack, permission profile, and deploy method — then connect via SSM."
+---
+
+Lowkey deploys a self-hosted AI coding agent to your AWS account. The installer handles everything: VPC, EC2 instance, IAM role, and agent bootstrap. All you need is AWS credentials and about ten minutes.
+
+<Warning>
+  Deploy Lowkey in a **dedicated sandbox AWS account**. The `builder` profile gets `AdministratorAccess`. LLMs make mistakes — a sandbox limits the blast radius. Never deploy into a production account.
+</Warning>
+
+## Prerequisites
+
+Before running the installer, confirm you have the following:
+
+<Steps>
+  <Step title="AWS credentials configured">
+    Run the command below. It must return your account ID without errors.
+
+    ```bash
+    aws sts get-caller-identity
+    ```
+
+    If you see an error, run `aws configure` or set `AWS_PROFILE` to a profile with admin access on your sandbox account.
+  </Step>
+  <Step title="A supported shell">
+    The installer works in `bash`, `zsh`, and **AWS CloudShell**. If you're using CloudShell, your credentials are already configured — you can skip the step above.
+  </Step>
+  <Step title="Bedrock access in your region (most packs)">
+    OpenClaw, Claude Code, NemoClaw, Hermes, Pi, and IronClaw all use Amazon Bedrock. Make sure your account has model access enabled for the region you plan to deploy into.
+
+    <Info>
+      Codex CLI (OpenAI) and Kiro CLI (Kiro cloud) do **not** use Bedrock. If you pick either of those, you can skip this step.
+    </Info>
+  </Step>
+</Steps>
+
+## Interactive install
+
+Run the one-liner below. The installer walks you through four choices — install mode, agent pack, permission profile, and deploy method — then provisions everything automatically.
+
+```bash
+curl -sfL install.lowkey.run | bash
+```
+
+When prompted, you'll choose:
+
+1. **Install mode** — Simple (recommended) or Advanced. Simple asks only for pack and profile, then auto-configures everything else. See [Simple-mode defaults](/reference/simple-mode-defaults) for what gets decided for you.
+2. **Agent pack** — the AI agent runtime to install (OpenClaw, Claude Code, Codex CLI, Kiro CLI, NemoClaw, Hermes, Pi, or IronClaw).
+3. **Profile** — the IAM permission level for the agent's EC2 instance.
+4. **Deploy method** — CloudFormation (default) or Terraform.
+
+## Non-interactive install
+
+Pass `-y` (or `--non-interactive`) with `--pack` and `--profile` to skip all prompts. This is useful for scripts, CI pipelines, or repeatable setups.
+
+<Tabs>
+  <Tab title="OpenClaw — builder">
+    Full stateful agent with persistent memory, 24/7 gateway, and multi-channel access (Telegram, Discord, Slack). Gets `AdministratorAccess`.
+
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw \
+      --profile builder
+    ```
+  </Tab>
+  <Tab title="OpenClaw — read-only">
+    Same agent, restricted to read-only AWS access plus Bedrock. Good for cost analysis, architecture review, and debugging without write risk.
+
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw \
+      --profile account_assistant
+    ```
+  </Tab>
+  <Tab title="Claude Code">
+    Anthropic's Claude Code CLI with native Bedrock support and auto-updates.
+
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack claude-code \
+      --profile builder
+    ```
+  </Tab>
+  <Tab title="Codex CLI">
+    OpenAI's Codex coding agent. Uses the OpenAI API directly — no Bedrock needed. After the stack finishes, SSM into the instance and run `codex login` to authenticate.
+
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack codex-cli \
+      --profile builder
+    ```
+
+    <Note>
+      Auth is deferred by design. The instance is up before you log in, so your OpenAI credentials never touch the installer or CloudFormation state.
+    </Note>
+  </Tab>
+  <Tab title="Kiro CLI">
+    AWS agentic IDE with MCP server support. Uses Kiro's own cloud inference — no Bedrock. To run headless (without interactive login after deploy), store your Kiro API key in Secrets Manager first.
+
+    ```bash
+    aws secretsmanager create-secret \
+      --name /lowkey/kiro-api-key \
+      --secret-string "$KIRO_API_KEY"
+
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack kiro-cli \
+      --profile builder \
+      --kiro-from-secret /lowkey/kiro-api-key
+    ```
+  </Tab>
+  <Tab title="NemoClaw">
+    OpenClaw running inside an NVIDIA OpenShell sandbox (Landlock + seccomp + network namespace isolation). Restricted to `personal_assistant` profile only — the sandbox blocks all AWS API access.
+
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack nemoclaw \
+      --profile personal_assistant
+    ```
+  </Tab>
+</Tabs>
+
+### CLI flags reference
+
+| Flag | Values | Description |
+|------|--------|-------------|
+| `-y`, `--non-interactive`, `--yes` | — | Skip all prompts; accept defaults |
+| `--pack <name>` | `openclaw`, `claude-code`, `codex-cli`, `kiro-cli`, `nemoclaw`, `hermes`, `pi`, `ironclaw` | Agent pack to deploy |
+| `--profile <name>` | `builder`, `account_assistant`, `personal_assistant` | IAM permission profile |
+| `--method <name>` | `cfn`, `terraform` / `tf` | Deploy method (default: `cfn`) |
+| `--simple` | — | Force simple install mode |
+| `--advanced` | — | Force advanced install mode |
+| `--kiro-from-secret <id\|arn>` | Secrets Manager ID or ARN | Kiro API key for headless Kiro CLI deploys |
+
+## What happens after you run the installer
+
+The installer creates your infrastructure and boots the agent in four stages:
+
+<AccordionGroup>
+  <Accordion title="CloudFormation (or Terraform) creates the base infrastructure">
+    A new VPC (`10.0.0.0/16`), public subnet (`10.0.1.0/24`), internet gateway, security group, and IAM instance profile are created in your account. The EC2 instance size depends on your profile: `t4g.xlarge` for `builder`, `t4g.medium` for assistant profiles. All instances are arm64 Graviton.
+  </Accordion>
+  <Accordion title="UserData bootstrap runs on the instance">
+    The instance installs Node.js via mise, clones the Lowkey repo, and dispatches to the selected pack's `install.sh`. CloudFormation (or Terraform) waits for a success signal before marking the stack complete.
+  </Accordion>
+  <Accordion title="The agent pack installs and starts">
+    Each pack follows its own install logic — systemd service, CLI binary, or both. OpenClaw and NemoClaw install as systemd services; Claude Code and Codex CLI install as CLI tools you run interactively.
+  </Accordion>
+  <Accordion title="Security services turn on (builder and account_assistant)">
+    Security Hub, GuardDuty, Inspector, IAM Access Analyzer, and AWS Config recorder are enabled automatically. The `personal_assistant` profile skips all security services.
+  </Accordion>
+  <Accordion title="Connect via SSM Session Manager">
+    SSH is disabled by default. Connect using AWS Systems Manager:
+
+    ```bash
+    aws ssm start-session --target <instance-id> --region <your-region>
+    ```
+
+    Find the instance ID in the CloudFormation stack **Outputs** tab, or run:
+
+    ```bash
+    aws ec2 describe-instances \
+      --filters "Name=tag:loki:managed,Values=true" \
+      --query "Reservations[*].Instances[*].InstanceId" \
+      --output text
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Verify your install
+
+Once the stack reaches `CREATE_COMPLETE`, SSM into the instance and run the version check for your pack:
+
+<Tabs>
+  <Tab title="OpenClaw">
+    ```bash
+    openclaw --version
+    # Then launch the TUI:
+    openclaw tui
+    ```
+  </Tab>
+  <Tab title="Claude Code">
+    ```bash
+    claude --version
+    # Then start a session:
+    claude
+    ```
+  </Tab>
+  <Tab title="Codex CLI">
+    ```bash
+    codex --version
+    # Authenticate first (one-time):
+    codex login
+    ```
+  </Tab>
+  <Tab title="Kiro CLI">
+    ```bash
+    kiro-cli --version
+    # If not using --kiro-from-secret, log in:
+    kiro-cli login --use-device-flow
+    ```
+  </Tab>
+  <Tab title="NemoClaw">
+    ```bash
+    # NemoClaw runs OpenClaw inside a sandbox:
+    openclaw --version
+    openclaw tui
+    ```
+  </Tab>
+  <Tab title="Hermes">
+    ```bash
+    hermes --version
+    hermes
+    ```
+  </Tab>
+</Tabs>
+
+## Run the essential bootstraps
+
+After connecting to your agent for the first time, run the essential bootstraps. They configure skills, memory management, coding standards, and security practices — and significantly reduce agent mistakes.
+
+Paste this into your agent chat:
+
+```
+Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/tree/main/bootstraps/essential
+```
+
+See [Essential bootstraps](/bootstraps/essential) for the full list of what gets configured.
+
+## Risks
+
+<Warning>
+  Read this section before deploying, especially if you're using the `builder` profile.
+</Warning>
+
+The `builder` profile gives your agent `AdministratorAccess` to your AWS account. That's what makes it useful — and what makes it dangerous:
+
+- **LLMs make mistakes.** They can misconfigure IAM policies, delete resources, create overly permissive security groups, or run up costs with unintended resource creation. This will happen eventually.
+- **Admin access means admin-level damage.** If the model hallucinates a destructive command, it has the permissions to execute it. There is no approval gate by default.
+- **Non-deterministic behavior.** The same prompt can produce different infrastructure on different days. Not all changes are reversible.
+- **Lowkey is not a security product.** It can surface GuardDuty and Security Hub findings, but an LLM summarizing alerts is not the same as a security team.
+
+**Recommended mitigations:**
+
+1. **Use a dedicated sandbox account.** This is the single most important thing you can do. One account = one blast radius.
+2. **Set AWS Budgets alerts** from day one.
+3. **Review CloudTrail** periodically — every API call the agent makes is logged there.
+4. **Start small.** Build a simple app before asking the agent to design a multi-service platform.
+
+## Clean up
+
+To remove a Lowkey deployment and all resources it created, run the uninstaller. It finds deployments by tag, lets you pick which to remove, and handles both CloudFormation and Terraform.
+
+```bash
+curl -sfL uninstall.lowkey.run | bash
+```
+
+To remove a specific stack manually:
+
+```bash
+# CloudFormation
+aws cloudformation delete-stack --stack-name <your-stack-name> --region <your-region>
+
+# Terraform
+terraform destroy
+```
+
+<Note>
+  The uninstaller also offers to remove Terraform state buckets and DynamoDB lock tables if they exist. Any Bedrock inference charges stop when the instance terminates.
+</Note>

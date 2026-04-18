@@ -1,0 +1,163 @@
+---
+title: "Deploy Lowkey using AWS CloudFormation (default method)"
+description: "How the Lowkey CloudFormation template works, all key parameters, stack lifecycle commands, and how to find your EC2 instance after deploy."
+---
+
+CloudFormation is Lowkey's default deploy method. When you run the installer and pick "CloudFormation CLI" (or use `-y` without `--method`), `install.sh` calls `aws cloudformation create-stack` with the right parameters derived from your pack and profile choices. The template lives at `deploy/cloudformation/template.yaml` in the Lowkey repository.
+
+## What the stack creates
+
+One CloudFormation stack creates all of the following:
+
+- **VPC, public subnet, internet gateway, and route table** — a fresh network by default; reusable if you pass `ExistingVpcId`
+- **Security group** — egress-all; inbound SSH disabled by default
+- **IAM role and instance profile** — scoped to your chosen profile
+- **EC2 instance** — ARM64 Graviton, sized per profile
+- **SSM session preferences** — for secure shell access without open ports
+- **Security service subscriptions** (optional) — Security Hub, GuardDuty, Inspector, Access Analyzer, Config recorder
+
+## Using the installer (recommended)
+
+The simplest path is to let the installer handle everything:
+
+```bash
+curl -sfL install.lowkey.run | bash
+```
+
+Or in non-interactive mode:
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack openclaw --profile builder
+```
+
+The installer computes all ~17 CloudFormation parameters from your choices and calls `aws cloudformation create-stack` for you.
+
+## Deploying the template manually
+
+If you prefer to deploy directly, clone the repo and run `aws cloudformation create-stack` yourself:
+
+```bash
+git clone https://github.com/inceptionstack/lowkey.git
+cd lowkey
+
+aws cloudformation create-stack \
+  --stack-name my-openclaw \
+  --template-body file://deploy/cloudformation/template.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region us-east-1 \
+  --parameters \
+    ParameterKey=PackName,ParameterValue=openclaw \
+    ParameterKey=ProfileName,ParameterValue=builder \
+    ParameterKey=EnvironmentName,ParameterValue=my-openclaw \
+    ParameterKey=InstanceType,ParameterValue=t4g.xlarge \
+    ParameterKey=DefaultModel,ParameterValue=us.anthropic.claude-opus-4-6-v1 \
+    ParameterKey=LokiWatermark,ParameterValue=my-openclaw \
+    ParameterKey=EnableSecurityHub,ParameterValue=true \
+    ParameterKey=EnableGuardDuty,ParameterValue=true \
+    ParameterKey=EnableInspector,ParameterValue=true \
+    ParameterKey=EnableAccessAnalyzer,ParameterValue=true \
+    ParameterKey=EnableConfigRecorder,ParameterValue=true
+```
+
+Running the installer is almost always easier — it computes and validates all parameters for you.
+
+## Key template parameters
+
+<Info>
+You rarely set these by hand. The installer computes them from your pack, profile, and flags. This table is the reference if you deploy the template directly or need to understand what was set.
+</Info>
+
+| Parameter | Example value | Description |
+|-----------|--------------|-------------|
+| `PackName` | `openclaw` | Which agent pack to install |
+| `ProfileName` | `builder` | IAM permission profile |
+| `EnvironmentName` | `openclaw-1-4521` | Name prefix for every resource in the stack |
+| `InstanceType` | `t4g.xlarge` | EC2 instance type (must be ARM64) |
+| `DefaultModel` | `us.anthropic.claude-opus-4-6-v1` | Default AI model ID for the pack |
+| `ModelMode` | `bedrock` | Model access mode: `bedrock`, `litellm`, or `api-key` |
+| `BedrockRegion` | `us-east-1` | Bedrock region (can differ from deploy region) |
+| `LokiWatermark` | `openclaw-1-4521` | Tag applied to every resource for easy cleanup |
+| `EnableSecurityHub` | `true` | Enable AWS Security Hub |
+| `EnableGuardDuty` | `true` | Enable Amazon GuardDuty |
+| `EnableInspector` | `true` | Enable Amazon Inspector |
+| `EnableAccessAnalyzer` | `true` | Enable IAM Access Analyzer |
+| `EnableConfigRecorder` | `true` | Enable AWS Config recorder |
+| `ExistingVpcId` | `vpc-0abc123` | Reuse an existing VPC instead of creating one |
+| `ExistingSubnetId` | `subnet-0def456` | Public subnet in the existing VPC (required with `ExistingVpcId`) |
+| `SSHAllowedCidr` | `127.0.0.1/32` | CIDR allowed to SSH. Default disables SSH entirely — use SSM instead |
+| `KiroFromSecret` | `/lowkey/kiro-api-key` | Secrets Manager id or ARN for the Kiro API key (kiro-cli pack only) |
+| `LiteLLMApiKey` | — | `NoEcho: true` — only used when `ModelMode=litellm` |
+| `ProviderApiKey` | — | `NoEcho: true` — only used when `ModelMode=api-key` |
+| `RepoBranch` | `main` | Git branch of the Lowkey repo to clone on the instance |
+
+<Warning>
+`LiteLLMApiKey` and `ProviderApiKey` are `NoEcho: true`, so they won't appear in `describe-stacks` output or the console. They still pass through UserData in Base64-encoded form, which is queryable via `describe-instance-attribute`. For production secrets, use the `--kiro-from-secret` / Secrets Manager pattern — only the secret reference flows through deploy state. See [Managing secrets with AWS Secrets Manager](/reference/secrets-manager).
+</Warning>
+
+## Watching deploy progress
+
+The installer streams stack events to your terminal. If you deployed manually, watch events with:
+
+```bash
+aws cloudformation describe-stack-events \
+  --stack-name my-openclaw \
+  --query 'StackEvents[?ResourceStatus==`CREATE_IN_PROGRESS` || ResourceStatus==`CREATE_FAILED`]'
+```
+
+The bootstrap script also publishes progress to SSM Parameter Store as it runs:
+
+```bash
+# Current step name
+aws ssm get-parameter --name /loki/setup-step --query Parameter.Value --output text
+
+# Overall status: IN_PROGRESS | COMPLETE | FAILED
+aws ssm get-parameter --name /loki/setup-status --query Parameter.Value --output text
+```
+
+## Finding your instance ID after deploy
+
+Once the stack reaches `CREATE_COMPLETE`, retrieve the instance ID from the stack Outputs:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name my-openclaw \
+  --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' \
+  --output text
+```
+
+Then connect via SSM:
+
+```bash
+aws ssm start-session --target <instance-id> --region us-east-1
+```
+
+## Updating the stack
+
+To change parameters after initial deploy — for example to upgrade the instance type — run `update-stack`:
+
+```bash
+aws cloudformation update-stack \
+  --stack-name my-openclaw \
+  --template-body file://deploy/cloudformation/template.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameters \
+    ParameterKey=InstanceType,ParameterValue=t4g.2xlarge \
+    ParameterKey=PackName,UsePreviousValue=true \
+    ParameterKey=ProfileName,UsePreviousValue=true \
+    ...
+```
+
+## Tear-down
+
+Delete the stack to remove every resource it created — VPC, EC2, IAM role, security services, and all:
+
+```bash
+aws cloudformation delete-stack --stack-name my-openclaw
+```
+
+<Info>
+If you reused an existing VPC by passing `ExistingVpcId`, that VPC is **not** deleted when the stack is removed. You brought it, so you keep it.
+</Info>
+
+Security service subscriptions (GuardDuty, Security Hub, Inspector) may persist briefly after stack deletion — AWS detaches them asynchronously.

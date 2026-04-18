@@ -1,0 +1,51 @@
+---
+title: "Essential bootstraps to run on every new Lowkey agent"
+description: "Run essential bootstraps right after your first session. They reduce mistakes, set the correct AI models, and configure the tools your agent relies on."
+---
+
+Essential bootstraps are the first thing you should run after connecting to a new Lowkey agent. They don't add optional features — they establish the baseline your agent needs to behave correctly and safely. Without them, the agent uses default settings that are often wrong for a production AWS environment: the wrong model context window, no coding standards, no memory search, and no disk space awareness.
+
+## Run all essential bootstraps at once
+
+Paste this into your agent chat:
+
+```
+Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/tree/main/bootstraps/essential
+```
+
+The agent reads every file in the directory and applies them in order. This takes a few minutes. When it's done, it will confirm what was configured.
+
+<Warning>
+  Run `BOOTSTRAP-MODEL-CONFIG` before any other bootstrap. It sets the correct model context window for Claude on Bedrock — without it, Opus 4.6 gets capped at 32K tokens instead of 200K, which causes frequent context limit errors during long tasks.
+</Warning>
+
+## What each essential bootstrap configures
+
+| Bootstrap | What it sets up |
+|---|---|
+| **BOOTSTRAP-MODEL-CONFIG** | AI model settings: Opus 4.6 for interactive sessions, Sonnet 4.6 for cron jobs. Fixes the 200K context window for Bedrock. |
+| **BOOTSTRAP-ALARMS** | CloudWatch alarm monitoring with four tiers: instance survival (auto-recover), alert thresholds, service health checks, and operational awareness metrics. |
+| **BOOTSTRAP-CODING-GUIDELINES** | Development standards: no hardcoded secrets, Graviton ARM64 by default, IaC-first, no manual deploys, Git hygiene rules. Runs a daily automated audit. |
+| **BOOTSTRAP-DAILY-UPDATE** | Daily status update procedure: AWS costs, security findings, CVEs, pipeline status — delivered before you open your laptop. |
+| **BOOTSTRAP-DIAGRAMS** | Architecture diagram generation using standard AWS diagram tools. |
+| **BOOTSTRAP-DISK-SPACE-STRAT** | Disk space management strategy for the agent's EBS volume, including cleanup rules and alerting thresholds. |
+| **BOOTSTRAP-MCPORTER** | MCPorter for calling MCP (Model Context Protocol) servers from the command line, no IDE required. |
+| **BOOTSTRAP-MEMORY-SEARCH** | Persistent memory search so the agent can recall past conversations, decisions, and deployed resources across sessions. |
+| **BOOTSTRAP-PLAYWRIGHT** | Playwright browser automation for tasks that require web interaction. |
+| **BOOTSTRAP-SECRETS-AWS** | AWS secrets and credential management via Secrets Manager and SSM Parameter Store. |
+| **BOOTSTRAP-SECURITY** | Security protocols: allowlist policies, GuardDuty integration, coding-level security rules, and safe handling of destructive operations. |
+| **BOOTSTRAP-SKILLS** | Skills and capabilities configuration — what the agent knows how to do and how it loads domain-specific skill files. |
+
+## Run a specific bootstrap individually
+
+If you need to re-run or update a single bootstrap, point your agent at the specific file:
+
+```
+Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/blob/main/bootstraps/essential/BOOTSTRAP-MODEL-CONFIG.md
+```
+
+Replace `BOOTSTRAP-MODEL-CONFIG.md` with the filename of whichever bootstrap you want to run. This is useful after an agent update or if you want to refresh a single configuration without re-running the entire set.
+
+<Tip>
+  After the essential bootstraps complete, your agent writes marker files (e.g. `memory/.bootstrapped-model-config`) so it knows which bootstraps have already run. If you re-run the full essential set, already-completed bootstraps are skipped automatically.
+</Tip>

@@ -1,0 +1,168 @@
+---
+title: "Deploy Lowkey using Terraform: variables and workflow"
+description: "How to use Terraform as your Lowkey deploy method — all input variables, state management with S3 backend, outputs, and teardown instructions."
+---
+
+Lowkey ships a Terraform module at `deploy/terraform/` that creates exactly the same AWS resources as the CloudFormation template — same VPC, IAM, EC2, and security services. Use it if your team already runs Terraform or if you want the `plan` → inspect → `apply` workflow before any resources are created.
+
+## Module layout
+
+```
+deploy/terraform/
+├── main.tf        # VPC, security group, IAM role, EC2, security services
+├── variables.tf   # All input variables with descriptions and validation
+├── outputs.tf     # instance_id, public_ip, vpc_id, ssm_connect, and more
+└── providers.tf   # AWS provider constraints
+```
+
+## Using the installer (recommended)
+
+The fastest path is to let the installer run Terraform for you. Pass `--method terraform`:
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack openclaw --profile builder \
+  --method terraform
+```
+
+The installer:
+
+1. Checks for Terraform >= 1.10 (installs it automatically if missing — no root required)
+2. Creates an S3 backend bucket with versioning and KMS encryption
+3. Writes a `backend.tf` pointing at that bucket
+4. Runs `terraform init` → `validate` → `apply -auto-approve`
+
+If you want to review the plan before any resources are created, use the direct path below instead.
+
+## Running Terraform directly
+
+Clone the repo and run Terraform yourself for the full plan-then-apply workflow:
+
+```bash
+git clone https://github.com/inceptionstack/lowkey.git
+cd lowkey/deploy/terraform
+
+terraform init
+terraform plan \
+  -var="pack_name=openclaw" \
+  -var="profile_name=builder" \
+  -var="environment_name=my-openclaw"
+# Review the plan output, then:
+terraform apply \
+  -var="pack_name=openclaw" \
+  -var="profile_name=builder" \
+  -var="environment_name=my-openclaw"
+```
+
+`profile_name` and `environment_name` are required — they have no defaults.
+
+## Key variables
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `pack_name` | string | `openclaw` | Agent pack to deploy. Valid: `openclaw`, `claude-code`, `hermes`, `pi`, `ironclaw`, `nemoclaw`, `kiro-cli`, `codex-cli`. |
+| `profile_name` | string | **required** | Permission profile. No default — must be set. Valid: `builder`, `account_assistant`, `personal_assistant`. |
+| `environment_name` | string | **required** | Short name prefix for all resources. Lowercase letters, numbers, and hyphens only. |
+| `aws_region` | string | `us-east-1` | AWS region for deployment. |
+| `instance_type` | string | `t4g.xlarge` | EC2 instance type. Must be ARM64 Graviton (t4g, m7g, or c7g family). |
+| `default_model` | string | `us.anthropic.claude-opus-4-6-v1` | Default AI model ID. |
+| `model_mode` | string | `bedrock` | Model access mode: `bedrock`, `litellm`, or `api-key`. |
+| `bedrock_region` | string | `us-east-1` | AWS region for Bedrock API calls. |
+| `data_volume_size` | number | `80` | Separate data volume in GB. Set to `0` to skip (uses root volume). |
+| `root_volume_size` | number | `40` | Root disk size in GB. |
+| `vpc_cidr` | string | `10.0.0.0/16` | CIDR for the new VPC. |
+| `public_subnet_cidr` | string | `10.0.1.0/24` | CIDR for the public subnet. |
+| `ssh_allowed_cidr` | string | `127.0.0.1/32` | CIDR allowed to SSH. Default disables SSH — use SSM. |
+| `litellm_base_url` | string | `""` | LiteLLM proxy URL (only for `model_mode=litellm`). |
+| `litellm_api_key` | string (sensitive) | `""` | LiteLLM API key. |
+| `litellm_model` | string | `claude-opus-4-6` | Model alias on your LiteLLM proxy. |
+| `provider_api_key` | string (sensitive) | `""` | Direct provider API key (only for `model_mode=api-key`). |
+| `kiro_from_secret` | string | `""` | Secrets Manager id or ARN for the Kiro API key. The raw key is never stored in state. |
+| `existing_vpc_id` | string | `""` | Reuse an existing VPC. Leave empty to create a new one. |
+| `existing_subnet_id` | string | `""` | Public subnet in the existing VPC. Required when `existing_vpc_id` is set. |
+| `enable_security_hub` | bool | `true` | Enable AWS Security Hub. |
+| `enable_guardduty` | bool | `true` | Enable Amazon GuardDuty. |
+| `enable_inspector` | bool | `true` | Enable Amazon Inspector. |
+| `enable_access_analyzer` | bool | `true` | Enable IAM Access Analyzer. |
+| `enable_config_recorder` | bool | `true` | Enable AWS Config recorder. |
+| `repo_branch` | string | `main` | Lowkey repo branch to clone on the instance. |
+
+`variables.tf` is the authoritative source — check there for validation rules and any variables added after this page was written.
+
+## Sensitive variables and state security
+
+`litellm_api_key` and `provider_api_key` are marked `sensitive = true` in Terraform, so they won't appear in plan or apply output. They **do** appear in Terraform state in plaintext.
+
+<Warning>
+If you use `litellm_api_key` or `provider_api_key`, use a remote backend with encryption — for example, an S3 bucket with KMS, or Terraform Cloud. The installer sets this up automatically (S3 + native locking). If you deploy manually, configure a remote backend yourself before running `apply`.
+</Warning>
+
+The `kiro_from_secret` variable only stores a Secrets Manager reference, not the raw key. The instance resolves the actual key at install time via its IAM role. This is the recommended pattern for secrets — see [Managing secrets with AWS Secrets Manager](/reference/secrets-manager).
+
+## State management
+
+When you use the installer, it creates an S3 backend bucket automatically:
+
+- **Bucket name**: `<environment-name>-tfstate-<account-id>`
+- **State key**: `loki-agent/terraform.tfstate`
+- **Encryption**: KMS server-side encryption, public access blocked
+- **Locking**: native S3 locking (Terraform >= 1.10)
+
+The VPC is tagged with `loki:tf-state-bucket` and `loki:tf-state-key` so the uninstaller can find and clean up state.
+
+If you deploy manually, set up your own backend in `backend.tf` before running `terraform init`.
+
+## Terraform outputs
+
+After apply, retrieve outputs with:
+
+```bash
+terraform output
+```
+
+| Output | Description |
+|--------|-------------|
+| `instance_id` | EC2 instance ID |
+| `public_ip` | Public IP address |
+| `private_ip` | Private IP address |
+| `vpc_id` | VPC ID |
+| `security_group_id` | Security group ID |
+| `role_arn` | IAM role ARN |
+| `ssm_connect` | Ready-to-run `aws ssm start-session` command |
+| `pack_name` | Deployed agent pack |
+| `profile_name` | Deployed permission profile |
+
+## Watching bootstrap progress
+
+The bootstrap script publishes progress to SSM Parameter Store regardless of which IaC tool you used:
+
+```bash
+# Current step name
+aws ssm get-parameter --name /loki/setup-step --query Parameter.Value --output text
+
+# Overall status: IN_PROGRESS | COMPLETE | FAILED
+aws ssm get-parameter --name /loki/setup-status --query Parameter.Value --output text
+```
+
+Once you see `COMPLETE`, connect via SSM:
+
+```bash
+aws ssm start-session --target $(terraform output -raw instance_id) --region us-east-1
+```
+
+## Tear-down
+
+Remove every resource Lowkey created:
+
+```bash
+cd deploy/terraform
+terraform destroy
+```
+
+<Info>
+If you passed an existing VPC via `existing_vpc_id`, that VPC is kept — Terraform only destroys resources it created.
+</Info>
+
+## Parity with CloudFormation
+
+The Terraform module and CloudFormation template are kept in sync by the repo's test suite. If you find a parameter that exists in one but not the other, that is a bug — file an issue on GitHub.

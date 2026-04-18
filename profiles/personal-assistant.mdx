@@ -1,0 +1,90 @@
+---
+title: "Personal assistant profile: Bedrock-only inference"
+description: "The personal_assistant profile limits your agent to Amazon Bedrock inference only — no AWS API access, no security services, minimal cost footprint."
+---
+
+The `personal_assistant` profile strips AWS API access down to Bedrock inference and nothing else. The agent can call foundation models, but it cannot read or write any other AWS service. This makes it the right choice when you want an AI assistant for general tasks — writing, research, coding help, planning — without any risk of the agent interacting with your AWS account's resources.
+
+## What personal_assistant grants
+
+The personal_assistant profile uses a single inline policy with four permission groups:
+
+| Permission group | Actions |
+|-----------------|---------|
+| Bedrock inference | `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream`, `bedrock:GetUseCaseForModelAccess` |
+| Bedrock discovery | `bedrock:ListFoundationModels`, `bedrock:GetFoundationModel`, `bedrock:ListInferenceProfiles` |
+| SSM connectivity | SSM Session Manager actions (required to connect to the instance) |
+| Identity | `sts:GetCallerIdentity` |
+
+The agent cannot read your S3 buckets, list your EC2 instances, query Cost Explorer, read CloudWatch logs, or interact with any other AWS service. Its AWS surface is Bedrock, SSM (for you to connect), and nothing else.
+
+## When to use personal_assistant
+
+Use `personal_assistant` for general-purpose tasks that don't require AWS knowledge:
+
+- **Writing and editing** — drafting documents, emails, reports, and summaries
+- **Research** — synthesizing information, comparing options, answering questions
+- **Coding help** — reviewing code, explaining concepts, writing scripts (without deploying anything)
+- **Planning** — breaking down projects, generating checklists, thinking through architectures
+- **Daily tasks** — anything you'd use a capable AI assistant for
+
+## Default instance size
+
+Personal_assistant defaults to a **t4g.medium** (2 vCPU, 4 GiB RAM, arm64 Graviton).
+
+Inference-only workloads don't need a large instance. The t4g.medium handles them well and keeps costs low (~$25/month for the instance).
+
+## Security services
+
+All security services are **off by default** with `personal_assistant`:
+
+| Service | Default |
+|---------|---------|
+| Security Hub | Off |
+| GuardDuty | Off |
+| Inspector | Off |
+| Access Analyzer | Off |
+| Config recorder | Off |
+
+Because the agent has no AWS API access, there is nothing meaningful for these services to monitor. Leaving them off keeps the deployment lightweight and avoids unnecessary cost.
+
+## Required for NemoClaw
+
+`personal_assistant` is the **only compatible profile for NemoClaw**, the sandboxed agent pack.
+
+NemoClaw runs OpenClaw inside an [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandbox that applies Landlock filesystem restrictions, seccomp syscall filtering, and network namespace isolation. The sandbox blocks all outbound AWS API calls from inside the container — so any profile that grants AWS access would be meaningless at best and confusing at worst.
+
+With `personal_assistant`, the agent routes Bedrock inference through the `bedrockify` proxy running on the host (outside the sandbox), so it still gets model access without any direct AWS API surface inside the sandbox.
+
+<Warning>
+  Do not use `builder` or `account_assistant` with NemoClaw. The sandbox will block the AWS API calls those profiles are designed to enable, and the deploy will not work as expected.
+</Warning>
+
+## Deploy with personal_assistant
+
+<Tabs>
+  <Tab title="Claude Code">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y --pack claude-code --profile personal_assistant
+    ```
+  </Tab>
+  <Tab title="NemoClaw (sandboxed)">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y --pack nemoclaw --profile personal_assistant
+    ```
+  </Tab>
+  <Tab title="OpenClaw">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y --pack openclaw --profile personal_assistant
+    ```
+  </Tab>
+  <Tab title="Hermes">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y --pack hermes --profile personal_assistant
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  You can deploy `personal_assistant` in your main AWS account — not just a sandbox — since the agent has no access to your AWS resources. It can only invoke Bedrock models and connect via SSM.
+</Note>

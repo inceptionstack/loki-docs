@@ -1,0 +1,111 @@
+---
+title: "Claude Code: Anthropic's native coding CLI on Bedrock"
+description: "Run Anthropic's Claude Code on AWS via Amazon Bedrock with no API keys, automatic updates, and full tool permissions pre-approved out of the box."
+---
+
+Claude Code is Anthropic's official coding agent CLI. The Lowkey pack installs it directly from Anthropic's own installer, configures it to talk to Amazon Bedrock via the instance's IAM role, and sets full tool permissions so it can read, write, edit, and run shell commands without prompting. If you want Claude Code running on a server with no API key management, this is the simplest path.
+
+<Note>
+**Stable pack.** Claude Code is production-quality. Anthropic releases updates frequently, and the pack is configured to pick them up automatically.
+</Note>
+
+## What makes Claude Code different
+
+- **Native Bedrock — no proxy.** Claude Code talks to Bedrock directly using the `CLAUDE_CODE_USE_BEDROCK=1` environment variable. There is no bedrockify proxy layer between the CLI and the model.
+- **Auto-updates.** The pack uses Anthropic's official installer. When Anthropic releases a new version of Claude Code, your instance can update itself.
+- **Full tool permissions.** The pack writes `~/.claude/settings.json` with `Bash(*)`, `Read(*)`, `Write(*)`, and `Edit(*)` pre-approved — no permission prompts during agent runs.
+- **No data volume needed.** Claude Code is stateless on disk. The data volume is set to 0 GB, which lowers your storage cost.
+
+## Compatible profiles
+
+| Profile | IAM permissions | Instance | Use case |
+|---|---|---|---|
+| `builder` | AdministratorAccess | `t4g.xlarge` | Build apps, deploy infra, manage pipelines |
+| `account_assistant` | ReadOnlyAccess + Bedrock | `t4g.large` (pack default) | Architecture review, cost analysis, debugging |
+| `personal_assistant` | Bedrock only | `t4g.large` | Writing, research, coding help |
+
+## Prerequisites
+
+- AWS CLI configured with admin access in a **dedicated sandbox account**
+- Amazon Bedrock model access enabled in your target region (default: `us-east-1`)
+- No API keys, Docker, or interactive login needed
+
+## Install
+
+<Tabs>
+  <Tab title="Builder">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack claude-code \
+      --profile builder
+    ```
+  </Tab>
+  <Tab title="Account assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack claude-code \
+      --profile account_assistant
+    ```
+  </Tab>
+  <Tab title="Personal assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack claude-code \
+      --profile personal_assistant
+    ```
+  </Tab>
+</Tabs>
+
+The pack downloads and runs Anthropic's official installer, then writes a Bedrock environment file (`~/.claude/bedrock-env.sh`) that sets `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, `ANTHROPIC_MODEL`, and `ANTHROPIC_DEFAULT_HAIKU_MODEL`. These variables are sourced automatically in every new shell session.
+
+## Connect and use
+
+After the stack deploys, SSM into the instance and run `claude` directly — no login step required:
+
+```bash
+# Open a session
+aws ssm start-session --target <instance-id>
+
+# Verify the install
+claude --version
+
+# Start an interactive session in a directory
+claude
+
+# One-shot prompt against a repository
+claude "explain this repo" /home/ec2-user/your-repo
+```
+
+Bedrock authentication is handled by the instance's IAM role. There is nothing to log into.
+
+## Configuration options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--region` | `us-east-1` | AWS region for Bedrock |
+| `--model` | `us.anthropic.claude-sonnet-4-6` | Main model (`ANTHROPIC_MODEL`) |
+| `--haiku-model` | `us.anthropic.claude-haiku-4-5-20251001-v1:0` | Fast-path model (`ANTHROPIC_DEFAULT_HAIKU_MODEL`) |
+
+To use a custom Bedrock model ID (for example, a provisioned-throughput ARN), run the installer in advanced mode:
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack claude-code \
+  --profile builder \
+  --advanced
+```
+
+## Resource requirements
+
+| | Builder | Assistant profiles |
+|---|---|---|
+| Instance type | `t4g.xlarge` | `t4g.large` |
+| Root volume | 40 GB | 40 GB |
+| Data volume | 0 GB | 0 GB |
+
+## Notes and limitations
+
+- Claude Code is a **pure CLI pack** — there is no background gateway service. The agent runs only when you actively SSM into the instance and invoke `claude`.
+- Auto-updates mean the version running on your instance may differ from the version documented here. Pin with caution — Anthropic's updates often include important bug fixes.
+- There is no persistent memory between sessions by default. Each `claude` invocation starts with the context you provide in that session.
+- Tearing down the CloudFormation or Terraform stack leaves no lingering state to clean up.

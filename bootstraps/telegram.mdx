@@ -1,0 +1,80 @@
+---
+title: "Connect Lowkey to Telegram for chat access anywhere"
+description: "Telegram integration lets you interact with your Lowkey agent from any device. Two bootstraps cover direct messages and multi-agent group chats."
+---
+
+Telegram integration turns your Lowkey agent into something you can reach from anywhere — your phone, tablet, or any device with Telegram installed. Instead of opening an SSM terminal session, you message your bot and get a response. Your agent can also send you proactive notifications: morning briefings, pipeline failures, security findings, and cost summaries.
+
+<Note>
+  Telegram integration is primarily useful for OpenClaw. Other agent packs (Claude Code, Codex CLI, Hermes, Pi, IronClaw, Kiro CLI) are terminal-based tools. Some have Telegram support — check their specific bootstrap sections — but the full interactive chat experience is an OpenClaw feature.
+</Note>
+
+## Prerequisites
+
+Before running the Telegram bootstraps, you need:
+
+- A Telegram account
+- A Telegram bot token from BotFather (free — takes about 2 minutes to create)
+- The essential bootstraps already run on your agent
+
+## Available Telegram bootstraps
+
+<CardGroup cols={2}>
+  <Card title="BOOTSTRAP-TELEGRAM" icon="robot">
+    Sets up your agent as a Telegram bot for direct messages. Covers creating the bot with BotFather, storing the token in AWS Secrets Manager, configuring the agent, and setting up allowlists so only you can interact with it.
+
+    Run this first.
+  </Card>
+  <Card title="BOOTSTRAP-TELEGRAM-GROUP" icon="users">
+    Configures your agent to participate in a private Telegram group. Useful when you're running multiple Lowkey instances across different AWS accounts and want to broadcast commands to all of them from one place.
+
+    Run this only after `BOOTSTRAP-TELEGRAM` is working.
+  </Card>
+</CardGroup>
+
+## Run the Telegram bootstraps
+
+<Steps>
+  <Step title="Set up direct message integration">
+    Paste this into your agent chat:
+
+    ```
+    Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/blob/main/bootstraps/telegram/BOOTSTRAP-TELEGRAM.md
+    ```
+
+    The agent walks you through creating the bot with BotFather, storing your token securely, and configuring the Telegram channel. At the end, send your bot a message — you should get a response within a few seconds.
+  </Step>
+  <Step title="Verify DMs are working">
+    Before setting up group chat, confirm that direct messages work end-to-end. Send your bot a simple message like "status" and make sure you get a reply.
+  </Step>
+  <Step title="Set up group chat (optional)">
+    If you're running multiple agents and want to control them from a shared group, run:
+
+    ```
+    Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/blob/main/bootstraps/telegram/BOOTSTRAP-TELEGRAM-GROUP.md
+    ```
+
+    The agent will ask whether you're creating a new group or joining an existing one, then guide you through the BotFather privacy mode setting and group configuration.
+  </Step>
+</Steps>
+
+## Security considerations
+
+Both Telegram bootstraps configure allowlists by default — your agent only responds to your Telegram user ID, not to anyone who messages the bot. Keep this in place.
+
+<Warning>
+  Never set `dmPolicy: all` on your agent's Telegram config. Allowlist mode means only explicitly authorized user IDs can interact with your agent. Anyone else who finds your bot's username gets no response.
+</Warning>
+
+After setup, consider running `/setjoingroups → Disable` in BotFather to prevent your bot from being added to unauthorized groups. Re-enable it temporarily if you need to join a new group.
+
+## How the multi-agent group works
+
+When you have multiple Lowkey instances in a private Telegram group, you can broadcast to all of them at once or target a specific one:
+
+- **`@fleet check GuardDuty`** — all agents in the group respond
+- **`@all status`** — all agents respond
+- **Reply to a specific agent's message** — only that agent responds
+- **`@bot_username do X`** — only that specific agent responds
+
+Each agent only processes messages from your authorized user ID — bot-to-bot messages are ignored, so there are no reply loops.

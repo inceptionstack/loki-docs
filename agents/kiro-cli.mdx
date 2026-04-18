@@ -1,0 +1,150 @@
+---
+title: "Kiro CLI: deploy AWS's agentic IDE on your EC2 instance"
+description: "Deploy Kiro CLI on AWS with five AWS MCP servers pre-installed. Authenticate via browser SSO or store your API key in Secrets Manager for headless operation."
+---
+
+Kiro CLI is AWS's agentic terminal client — the IDE agent built for developers who live in the terminal. This pack installs Kiro CLI v2, pre-installs five AWS MCP servers (Terraform, ECS, EKS, core, and documentation), and gives you a choice of two auth paths: an interactive browser device flow, or a fully headless mode where your Kiro API key lives in AWS Secrets Manager and never appears in deploy state or shell history.
+
+<Note>
+**Experimental pack.** Kiro CLI uses its own cloud inference — not Amazon Bedrock or bedrockify. Your prompts leave your AWS account and go to Kiro's infrastructure. Auth shape may change as the upstream CLI evolves.
+</Note>
+
+<Warning>
+Kiro CLI **does not use Bedrock**. It connects to Kiro's cloud inference. You need a Kiro account — get one at [kiro.dev](https://kiro.dev).
+</Warning>
+
+## What makes Kiro CLI different
+
+- **AWS MCP servers pre-installed.** The pack installs `awslabs.terraform-mcp-server`, `awslabs.ecs-mcp-server`, `awslabs.eks-mcp-server`, `awslabs.core-mcp-server`, and `awslabs.aws-documentation-mcp-server` using `uv` + `uvenv`.
+- **Two auth modes.** Interactive browser SSO (`kiro-cli login --use-device-flow`) or headless via a Secrets Manager secret (`--kiro-from-secret`). The raw key never appears in CloudFormation state, Terraform state, or UserData logs.
+- **Headless one-shot mode.** Once authenticated, run `kiro-cli --no-interactive "prompt"` for CI-style automation.
+- **No Bedrock dependency.** The pack installs with no bedrockify and no IAM Bedrock permissions required.
+
+## Compatible profiles
+
+| Profile | IAM permissions | Use case |
+|---|---|---|
+| `builder` | AdministratorAccess | Build apps, deploy infra (recommended) |
+| `account_assistant` | ReadOnlyAccess + Bedrock | Read-only AWS ops |
+| `personal_assistant` | Bedrock only | General-purpose (Bedrock unused by Kiro) |
+
+## Prerequisites
+
+- AWS CLI configured with admin access in a **dedicated sandbox account**
+- A Kiro account — sign up at [kiro.dev](https://kiro.dev)
+- For headless mode: an API key from [app.kiro.dev](https://app.kiro.dev) stored in AWS Secrets Manager before deploy
+- No Bedrock access or Docker needed
+
+## Install
+
+<Tabs>
+  <Tab title="Headless (recommended for automation)">
+    Store your Kiro API key in Secrets Manager first, then pass the secret reference to the installer. The raw key never leaves Secrets Manager.
+
+    ```bash
+    # One-time: store your key
+    aws secretsmanager create-secret \
+      --name /lowkey/kiro-api-key \
+      --secret-string "$KIRO_API_KEY"
+
+    # Deploy with the secret reference
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack kiro-cli \
+      --profile builder \
+      --kiro-from-secret /lowkey/kiro-api-key
+    ```
+
+    After deploy, `KIRO_API_KEY` is written to `~/.kiro/env` (mode `0600`) and sourced automatically on login. No interactive login step needed.
+  </Tab>
+  <Tab title="Interactive (browser SSO after deploy)">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack kiro-cli \
+      --profile builder
+    ```
+
+    After deploy, SSM into the instance and run:
+
+    ```bash
+    kiro-cli login --use-device-flow
+    # Kiro prints a device code and URL. Open the URL in your browser and enter the code.
+    ```
+  </Tab>
+  <Tab title="Account assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack kiro-cli \
+      --profile account_assistant
+    ```
+  </Tab>
+</Tabs>
+
+## Connect and use
+
+```bash
+# Open a session
+aws ssm start-session --target <instance-id>
+
+# Verify install
+kiro-cli --version
+
+# Interactive TUI (prompts for login if not yet authenticated)
+kiro-cli
+
+# Headless one-shot (requires API key to be configured)
+kiro-cli --no-interactive "list running ECS tasks in us-east-1"
+
+# Start with a specific agent
+kiro-cli --agent platform-engineer
+```
+
+Inside the TUI, use `/model` to switch models and `/tools` to list available MCP tools.
+
+## Configuration options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--region` | `us-east-1` | AWS region (informational — Kiro uses its own cloud) |
+| `--kiro-from-secret` | — | Secrets Manager secret ID or ARN whose `SecretString` is the Kiro API key |
+
+<Note>
+The `--kiro-from-secret` flag is the only supported headless auth path through the top-level installer, CloudFormation, and Terraform. A legacy `--kiro-api-key` flag exists at the pack script level but is intentionally not threaded through the installer — passing secrets on the command line leaks them into shell history and `/proc/<pid>/cmdline`.
+</Note>
+
+## How `--kiro-from-secret` works
+
+When you pass `--kiro-from-secret /lowkey/kiro-api-key`, only the secret name flows through CloudFormation or Terraform state — never the raw key. At deploy time, the EC2 instance uses its IAM role to call `aws secretsmanager get-secret-value` and writes the resolved key to `~/.kiro/env` with `0600` permissions. The key is sourced automatically on every login.
+
+The raw key is never stored in CloudFormation state, Terraform state, or shell history at any point in this flow.
+
+## MCP servers
+
+The five pre-installed MCP servers are available inside the Kiro TUI:
+
+```bash
+kiro-cli
+> /tools
+# Lists: awslabs.terraform-mcp-server, ecs-mcp-server, eks-mcp-server, core-mcp-server, aws-documentation-mcp-server
+```
+
+Add additional MCP servers after deploy:
+
+```bash
+uvenv install awslabs.<server-name>
+```
+
+## Resource requirements
+
+| | All profiles |
+|---|---|
+| Instance type | `t4g.medium` |
+| Root volume | 40 GB |
+| Data volume | 0 GB |
+
+## Notes and limitations
+
+- Kiro CLI is a **pure CLI pack** — no background service runs between sessions.
+- Model selection happens inside the CLI with `/model`, not at deploy time. The `--model` installer flag is ignored.
+- Your prompts and code leave your AWS account and go to Kiro's infrastructure. Review Kiro's data policy before use.
+- When you tear down the stack, `~/.kiro/env` disappears with the EBS volume. Rotate the Secrets Manager value separately if the key is shared with other systems.
+- This pack is validated against Kiro CLI v2. The pack warns at install time if a v1 or v3+ binary is detected.

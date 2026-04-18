@@ -1,0 +1,138 @@
+---
+title: "Lowkey installer CLI reference: all flags and usage"
+description: "Every flag accepted by the Lowkey installer, canonical non-interactive invocation examples per agent pack, environment variables honored, and exit codes."
+---
+
+The Lowkey installer is the script you get from `install.lowkey.run`. You can run it interactively (it walks you through every choice) or pass flags to skip the prompts entirely. This page covers every flag, the environment variables the installer respects, and the exit codes it returns.
+
+## Flag reference
+
+| Flag | Purpose |
+|------|---------|
+| `-y`, `--yes`, `--non-interactive` | Accept all defaults and skip every prompt. Required for unattended or CI installs. |
+| `--simple` | Force simple mode — only asks for pack and profile, auto-configures everything else. |
+| `--advanced` | Force advanced mode — prompts for every parameter (VPC, instance type, each security service, etc.). |
+| `--pack <name>` | Pre-select the agent pack. Valid values: `openclaw`, `claude-code`, `codex-cli`, `kiro-cli`, `nemoclaw`, `hermes`, `pi`, `ironclaw`. |
+| `--profile <name>` | Pre-select the permission profile. Valid values: `builder`, `account_assistant`, `personal_assistant`. |
+| `--method <cfn\|terraform\|tf>` | Pre-select the deploy method. Default is CloudFormation via CLI (`cfn`). Use `terraform` or `tf` for Terraform. |
+| `--kiro-from-secret <id-or-arn>` | Secrets Manager secret id or ARN whose `SecretString` is your Kiro API key. Only the reference passes through deploy state — the raw key is resolved on the instance at install time. |
+| `--debug-in-repo` | Dev-only flag: run the installer from the current working directory instead of cloning from GitHub. |
+| `--help`, `-h` | Print the help text and exit. |
+
+<Info>
+Any explicit flag wins over an environment variable, which wins over the pack manifest default.
+</Info>
+
+## Canonical non-interactive invocations
+
+Use `-y` combined with `--pack` and `--profile` to deploy without any prompts.
+
+<Tabs>
+  <Tab title="OpenClaw builder">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw --profile builder
+    ```
+  </Tab>
+  <Tab title="Claude Code builder">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack claude-code --profile builder
+    ```
+  </Tab>
+  <Tab title="Codex CLI builder">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack codex-cli --profile builder
+    ```
+
+    After the stack reaches `CREATE_COMPLETE`, SSM into the instance and run `codex login` to authenticate.
+  </Tab>
+  <Tab title="Kiro CLI headless">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack kiro-cli --profile builder \
+      --kiro-from-secret /lowkey/kiro-api-key
+    ```
+
+    Store your Kiro API key in Secrets Manager first. See [Managing secrets with AWS Secrets Manager](/reference/secrets-manager).
+  </Tab>
+  <Tab title="NemoClaw personal">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack nemoclaw --profile personal_assistant
+    ```
+
+    NemoClaw requires the `personal_assistant` profile — its sandbox blocks all AWS API access.
+  </Tab>
+  <Tab title="Account assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw --profile account_assistant
+    ```
+  </Tab>
+</Tabs>
+
+## Terraform deploy method
+
+Pass `--method terraform` to have the installer run Terraform instead of CloudFormation:
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack openclaw --profile builder \
+  --method terraform
+```
+
+The installer runs `terraform init` → `validate` → `apply -auto-approve` under `deploy/terraform/`. If you want to review the plan before it applies, deploy Terraform directly instead — see [Deploy Lowkey with Terraform](/reference/terraform).
+
+## Advanced mode
+
+Advanced mode prompts for every parameter: VPC reuse, instance type, data volume size, region, and each security service individually. Pass `--advanced` to enable it, even alongside `-y`:
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack openclaw --profile builder \
+  --advanced
+```
+
+<Info>
+Advanced mode still honors `-y` for prompts that have a clear safe default. It only stops to ask for choices that genuinely need a decision.
+</Info>
+
+## Connect via SSM after install
+
+SSH is disabled by default (`SSHAllowedCidr=127.0.0.1/32`). Once your stack reaches `CREATE_COMPLETE`, connect using AWS Systems Manager Session Manager:
+
+```bash
+aws ssm start-session --target <instance-id> --region <region>
+```
+
+Find the instance ID in the CloudFormation stack **Outputs** tab, or retrieve it from the CLI:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name <stack-name> \
+  --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' \
+  --output text
+```
+
+To enable SSH, redeploy in advanced mode and set `SSHAllowedCidr` to your IP CIDR (for example, `1.2.3.4/32`).
+
+## Environment variables honored
+
+Set these in your shell before piping the installer to bash:
+
+| Variable | Effect |
+|----------|--------|
+| `AWS_REGION` / `AWS_DEFAULT_REGION` | Sets the deploy region. Overrides the AWS CLI profile default. |
+| `AWS_PROFILE` | Uses the named AWS CLI profile for all AWS API calls during install. |
+| `DEBUG_IN_REPO=1` | Equivalent to `--debug-in-repo`. Runs the installer from the current directory instead of cloning. |
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Install succeeded. |
+| `1` | Install failed — check stderr and `/tmp/loki-install.log`. |
+| `2` | Bad arguments — unknown flag or missing required value. |
+| `130` | Interrupted by Ctrl-C or SIGTERM. |

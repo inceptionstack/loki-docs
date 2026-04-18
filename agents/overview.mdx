@@ -1,0 +1,81 @@
+---
+title: "Agent packs: compare all available Lowkey AI agents"
+description: "Lowkey agent packs let you deploy a different AI coding runtime with one flag. Compare OpenClaw, Claude Code, Codex CLI, Kiro, and more by provider and auth."
+---
+
+Every Lowkey deployment runs exactly one agent pack — a self-contained module that installs a specific AI coding agent, wires it to a model provider, and configures the right permissions. You pick the pack at install time with `--pack <name>`, and the rest of the deploy flow (CloudFormation or Terraform, instance sizing, IAM roles) adapts automatically.
+
+## Pack comparison
+
+| Pack | Stability | Provider | Auth method | Key characteristic |
+|---|---|---|---|---|
+| [openclaw](/agents/openclaw) | Stable | Amazon Bedrock | IAM role (no key) | 24/7 gateway, persistent memory, multi-channel |
+| [claude-code](/agents/claude-code) | Stable | Amazon Bedrock | IAM role (no key) | Anthropic's native CLI, auto-updates, no data volume |
+| [codex-cli](/agents/codex-cli) | Experimental | OpenAI API | `codex login` post-install | Builder agent, danger-full-access, never prompts |
+| [kiro-cli](/agents/kiro-cli) | Experimental | Kiro cloud | SSO device flow or Secrets Manager | AWS MCP servers pre-installed |
+| [nemoclaw](/agents/nemoclaw) | Experimental | Bedrock via bedrockify | IAM role (no key) | OpenClaw inside OpenShell sandbox (Landlock + seccomp + netns) |
+| [hermes](/agents/hermes) | Experimental | Bedrock via bedrockify | IAM role (no key) | NousResearch CLI, self-improving skills, lightweight |
+
+<Info>
+**Stable** means the pack is production-quality and won't change its auth or API shape without notice. **Experimental** means the upstream agent may release breaking changes between Lowkey versions — expect rough edges.
+</Info>
+
+## Decision guide
+
+<CardGroup cols={2}>
+  <Card title="Persistent agent with memory and chat channels" icon="brain" href="/agents/openclaw">
+    Use **OpenClaw**. It runs a long-lived gateway service, stores conversation history in `~/.openclaw/` on an 80 GB volume, and connects to Telegram, Discord, Slack, or a TUI. The right choice for 24/7 operations.
+  </Card>
+  <Card title="Claude Code, exactly as Anthropic ships it" icon="terminal" href="/agents/claude-code">
+    Use **Claude Code**. Native Bedrock support with no proxy layer, auto-updates from Anthropic, and full tool permissions. The simplest path if you just want `claude` on a server.
+  </Card>
+  <Card title="OpenAI Codex as the agent" icon="microchip" href="/agents/codex-cli">
+    Use **Codex CLI**. Connects directly to OpenAI's API (not Bedrock). Configured as a builder agent — `danger-full-access` sandbox, approval policy set to never. You authenticate after deploy via `codex login`.
+  </Card>
+  <Card title="AWS agentic IDE with MCP tools" icon="wrench" href="/agents/kiro-cli">
+    Use **Kiro CLI**. Comes with five AWS MCP servers pre-installed (Terraform, ECS, EKS, core, docs). Supports headless mode via a Secrets Manager key or interactive browser SSO.
+  </Card>
+  <Card title="Maximum sandbox isolation" icon="shield" href="/agents/nemoclaw">
+    Use **NemoClaw**. OpenClaw runs inside NVIDIA's OpenShell sandbox (Landlock + seccomp + network namespace). The sandbox blocks all AWS API calls except Bedrock `InvokeModel` — only the `personal_assistant` profile is allowed.
+  </Card>
+  <Card title="Lightweight terminal-focused agent" icon="code" href="/agents/hermes">
+    Use **Hermes**. NousResearch's CLI agent with a self-improving skills loop, running against Bedrock via bedrockify. Lighter than OpenClaw — no gateway, no memory service, runs on a `t4g.medium`.
+  </Card>
+</CardGroup>
+
+## How agents differ from each other
+
+<AccordionGroup>
+  <Accordion title="Bedrock vs provider API">
+    **Bedrock-native packs** (openclaw, claude-code, nemoclaw, hermes) authenticate via the EC2 instance's IAM role — no API keys to manage. The model call goes to Amazon Bedrock inside your account, governed by the Bedrock data privacy policy.
+
+    **Provider-API packs** (codex-cli, kiro-cli) connect to an external API owned by a third party (OpenAI or Kiro). You must authenticate after deploy — either through a browser login flow or by storing a key in AWS Secrets Manager. Your prompts and code leave your AWS account to reach that provider.
+  </Accordion>
+  <Accordion title="Gateway service vs pure CLI">
+    **OpenClaw** installs a long-running `openclaw-gateway` systemd user service on port 3001. The gateway stays alive between sessions, handles channel integrations (Telegram, Discord, Slack), and processes scheduled tasks while you're away.
+
+    Every other pack is a **pure CLI binary**. You invoke it directly after SSM-ing into the instance. Nothing runs in the background between your sessions.
+  </Accordion>
+  <Accordion title="bedrockify dependency">
+    `hermes` and `nemoclaw` depend on **bedrockify** — an OpenAI-compatible proxy that translates standard OpenAI-style API calls into Bedrock `InvokeModel` calls. Those packs install bedrockify automatically as a dependency.
+
+    `claude-code` talks to Bedrock natively (`CLAUDE_CODE_USE_BEDROCK=1`) — no proxy needed. `openclaw` uses bedrockify in its default `bedrock` model-mode, but can also be pointed at a LiteLLM proxy or a direct Anthropic API key.
+  </Accordion>
+  <Accordion title="Data volume">
+    **Stateful packs** (openclaw, nemoclaw) mount an 80 GB EBS data volume to hold conversation history, agent memory, and workspace files that must survive instance restarts.
+
+    **Stateless CLI packs** (claude-code, codex-cli, kiro-cli, hermes) set the data volume to 0 GB — they don't need persistent disk beyond the root volume.
+  </Accordion>
+</AccordionGroup>
+
+## Same install flow across all packs
+
+Every pack uses the same one-liner, regardless of which agent it installs:
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack <pack-name> \
+  --profile <builder|account_assistant|personal_assistant>
+```
+
+Pack-specific flags (such as `--kiro-from-secret` for Kiro CLI) are documented on each agent's page. If you omit `--pack`, the installer defaults to `openclaw`.

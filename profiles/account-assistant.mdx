@@ -1,0 +1,104 @@
+---
+title: "Account assistant profile: read-only access on AWS"
+description: "The account_assistant profile gives your agent ReadOnlyAccess plus limited writes for tags and logs — safe for cost analysis, audits, and review."
+---
+
+The `account_assistant` profile is built for agents that need to understand your AWS account without modifying it. It combines the `ReadOnlyAccess` managed policy with a small inline policy that allows Bedrock inference and a few targeted write operations — enough to run queries, annotate resources, and write log events, but not enough to create, update, or delete any infrastructure.
+
+## What account_assistant grants
+
+The account_assistant profile attaches one managed policy and one inline policy:
+
+| Policy | Type | Purpose |
+|--------|------|---------|
+| `ReadOnlyAccess` | AWS managed | Read access to all AWS services |
+| Bedrock inline policy | Inline | `InvokeModel`, `InvokeModelWithResponseStream`, and model discovery |
+
+The targeted write permissions in the inline policy cover:
+
+- **Bedrock inference** — calling foundation models for reasoning and analysis
+- **Resource tagging** — annotating resources with findings or recommendations
+- **CloudWatch Logs** — writing log events (useful for audit trails)
+
+The profile also includes a deny policy that blocks the most destructive operations as an extra guardrail.
+
+<Note>
+  The agent cannot create, modify, or delete AWS resources with this profile. If you ask it to fix something it finds, it will describe what needs to change and you (or a `builder` agent) can apply the fix.
+</Note>
+
+## When to use account_assistant
+
+Use `account_assistant` when you want the agent to analyze or advise without the risk of unintended changes:
+
+- **Cost analysis** — reviewing spend by service, identifying over-provisioned resources, and estimating savings from rightsizing
+- **Architecture review** — reading your infrastructure and explaining what's deployed, how components connect, and where the risks are
+- **Security auditing** — reviewing IAM policies, security group rules, S3 bucket policies, and public resource exposure
+- **Debugging without touching** — tracing a production issue through CloudTrail, VPC flow logs, and CloudWatch without the ability to accidentally change something mid-investigation
+- **Onboarding** — getting a new team member or contractor up to speed on an existing account without granting them write access
+
+## Default instance size
+
+Account_assistant defaults to a **t4g.medium** (2 vCPU, 4 GiB RAM, arm64 Graviton).
+
+Read-only analysis workloads are much lighter than build workloads. The t4g.medium handles them comfortably and costs roughly half the t4g.xlarge (~$25/month vs ~$100/month).
+
+## Security services
+
+All five AWS security services are enabled by default with `account_assistant`:
+
+| Service | Default |
+|---------|---------|
+| Security Hub | On |
+| GuardDuty | On |
+| Inspector | On |
+| Access Analyzer | On |
+| Config recorder | On |
+
+This makes account_assistant particularly useful as a security review agent — it can read findings from all of these services and synthesize them into plain-language summaries and recommendations.
+
+## Deploy with account_assistant
+
+<Tabs>
+  <Tab title="OpenClaw">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y --pack openclaw --profile account_assistant
+    ```
+  </Tab>
+  <Tab title="Claude Code">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y --pack claude-code --profile account_assistant
+    ```
+  </Tab>
+  <Tab title="Hermes">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y --pack hermes --profile account_assistant
+    ```
+  </Tab>
+</Tabs>
+
+## Example tasks for account_assistant
+
+Once the agent is running, here are prompts that work well with read-only access:
+
+<AccordionGroup>
+  <Accordion title="Cost analysis">
+    ```
+    Review the last 30 days of AWS Cost Explorer data. Identify the top 5 cost drivers and flag any resources that look over-provisioned or idle.
+    ```
+  </Accordion>
+  <Accordion title="Security review">
+    ```
+    Audit all IAM roles in the account. Flag any roles with wildcard actions, unused roles (no activity in 90 days), and roles that allow cross-account trust without conditions.
+    ```
+  </Accordion>
+  <Accordion title="Architecture summary">
+    ```
+    Read the CloudFormation stacks in us-east-1 and produce an architecture summary: what services are deployed, how they connect, and what the estimated monthly cost is.
+    ```
+  </Accordion>
+  <Accordion title="Incident investigation">
+    ```
+    There was an error in the payments service around 14:30 UTC yesterday. Read the CloudTrail logs and CloudWatch Logs for that time window and tell me what happened.
+    ```
+  </Accordion>
+</AccordionGroup>
