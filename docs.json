@@ -93,6 +93,13 @@
               "reference/security-services",
               "reference/secrets-manager"
             ]
+          },
+          {
+            "group": "Telemetry",
+            "pages": [
+              "reference/telemetry-privacy",
+              "reference/telemetry-schema"
+            ]
           }
         ]
       }
