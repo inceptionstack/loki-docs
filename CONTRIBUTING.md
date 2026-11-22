@@ -22,6 +22,8 @@ Thank you for your interest in contributing to our documentation! This guide wil
 6. Preview your changes at `http://localhost:3000`
 7. Commit your changes and submit a pull request
 
+Secret scanning: this repo has a [pre-commit](https://pre-commit.com) config that runs [gitleaks](https://github.com/gitleaks/gitleaks) on staged changes. Enable it once per clone with `pre-commit install`.
+
 For more details on local development, see our [development guide](development.mdx).
 
 ## Writing guidelines
